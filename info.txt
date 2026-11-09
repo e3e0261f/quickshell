@@ -1,0 +1,10 @@
+~/.config/quickshell/
+├── Theme.qml              # 1. 核心调参中心（刻度、光晕、色谱、闹钟全部置顶）
+├── shell.qml              # 2. 根入口（时钟、音效引擎、双频水波动力学、网络输入法轮询）
+├── EdgeTop.qml            # 3. 顶边光轨组件（含红宝石圆点刻度 + 水滴）
+├── EdgeRight.qml          # 4. 右边光轨组件
+├── EdgeBottom.qml         # 5. 底边光轨组件
+├── EdgeLeft.qml           # 6. 左边光轨组件
+├── CornerBottomLeft.qml   # 7. 左下角生产力中心（时间、Wi-Fi、输入法、工作区、魔术区）
+├── CornerBottomRight.qml  # 8. 右下角控制中心（2x爆发、整点微音、动态调闹钟）
+└── CornerTopLeft.qml      # 9. 左上角快捷启动备用
