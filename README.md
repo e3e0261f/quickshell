@@ -1,1 +1,2 @@
 # rhyshell
+# quickshell
