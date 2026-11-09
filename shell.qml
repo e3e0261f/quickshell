@@ -3,19 +3,19 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Io
-import "./CenterInspect"
 
 ShellRoot {
     id: root
 
     Theme { id: theme }
 
-    // --- 基礎狀態屬性 ---
     property bool chimeEnabled: true
     property int lastChimedHour: -1
+
     property bool alarmEnabled: true
     property int alarmHour: theme.defaultAlarmHour
     property int alarmMinute: theme.defaultAlarmMinute
+
     property bool boostGlow: false
     property bool inspectMode: false
     property bool isBoosted: boostGlow || inspectMode
@@ -23,68 +23,95 @@ ShellRoot {
     property string currentWifi: "检测中..."
     property string currentIme: "EN"
 
-    // --- 座標屬性 ---
     property int shiftZx: 500
     property int shiftZy: 500
     property int shiftXx: 800
     property int shiftXy: 500
 
-    // --- 🚀 連擊引擎核心屬性 ---
     property bool cursorReturnEnabled: true
-    property bool dragDropEnabled: false
     property string clickerButtonCode: "0xC0"
     property bool autoClickerActive: false
     property bool autoQActive: false
 
     onAutoClickerActiveChanged: {
         if (autoClickerActive) {
-            autoClickerRunner.runScript("touch /tmp/clicker_active")
+            autoClickerRunner.runScript("while true; do ydotool click " + root.clickerButtonCode + "; sleep 0.08; done")
         } else {
-            autoClickerRunner.runScript("rm -f /tmp/clicker_active /tmp/clicker.lock")
+            autoClickerRunner.runScript("pkill -f 'ydotool click'")
         }
     }
 
-    onClickerButtonCodeChanged: {
-        autoClickerRunner.runScript("echo '" + clickerButtonCode + "' > /tmp/clicker_btn")
+    onAutoQActiveChanged: {
+        if (autoQActive) {
+            autoQRunner.runScript("stdbuf -oL libinput debug-events 2>/dev/null | grep --line-buffered 'KEY_Q.*pressed' | while read -r _; do ydotool key 16:1 16:0; done")
+        } else {
+            autoQRunner.runScript("pkill -f 'libinput debug-events'")
+        }
     }
 
     GlobalShortcut {
         name: "toggle_clicker"
         onPressed: {
-            if (root.autoClickerActive) {
-                autoClickerRunner.runScript("if [ -f /tmp/clicker.lock ]; then rm -f /tmp/clicker.lock; else touch /tmp/clicker.lock; fi")
-                soundPlayer.play("audio-volume-change")
-            }
+            root.autoClickerActive = !root.autoClickerActive
+            soundPlayer.play("audio-volume-change")
         }
     }
 
-    // --- 快捷鍵綁定 ---
     GlobalShortcut {
         name: "strike_z"
         onPressed: {
-            autoClickerRunner.runScript("~/.config/quickshell/combat_engine.sh strike " + root.shiftZx + " " + root.shiftZy + " " + root.dragDropEnabled + " " + root.cursorReturnEnabled)
+            var script = ""
+            if (root.cursorReturnEnabled) {
+                script = "CUR=$(hyprctl cursorpos 2>/dev/null | tr -d ' '); CX=$(echo $CUR | cut -d, -f1); CY=$(echo $CUR | cut -d, -f2); " +
+                         "ydotool mousemove -a " + root.shiftZx + " " + root.shiftZy + " && ydotool click 0xC0; " +
+                         "ydotool mousemove -a $CX $CY"
+            } else {
+                script = "ydotool mousemove -a " + root.shiftZx + " " + root.shiftZy + " && ydotool click 0xC0"
+            }
             soundPlayer.play("bell")
+            strikeRunner.runScript(script)
         }
     }
 
     GlobalShortcut {
         name: "strike_x"
         onPressed: {
-            autoClickerRunner.runScript("~/.config/quickshell/combat_engine.sh strike " + root.shiftXx + " " + root.shiftXy + " " + root.dragDropEnabled + " " + root.cursorReturnEnabled)
+            var script = ""
+            if (root.cursorReturnEnabled) {
+                script = "CUR=$(hyprctl cursorpos 2>/dev/null | tr -d ' '); CX=$(echo $CUR | cut -d, -f1); CY=$(echo $CUR | cut -d, -f2); " +
+                         "ydotool mousemove -a " + root.shiftXx + " " + root.shiftXy + " && ydotool click 0xC0; " +
+                         "ydotool mousemove -a $CX $CY"
+            } else {
+                script = "ydotool mousemove -a " + root.shiftXx + " " + root.shiftXy + " && ydotool click 0xC0"
+            }
             soundPlayer.play("bell")
+            strikeRunner.runScript(script)
         }
     }
 
-    GlobalShortcut {
-        name: "inspect_time"
-        onPressed: root.inspectMode = !root.inspectMode
+    Process {
+        id: autoClickerRunner
+        function runScript(cmd) {
+            command = ["sh", "-c", cmd]
+            running = false; running = true
+        }
     }
 
-    // --- 🚀 核心進程管理 ---
-    Process { id: autoClickerRunner; function runScript(cmd) { command = ["sh", "-c", cmd]; running = false; running = true } }
-    Process { id: autoQRunner; function runScript(cmd) { command = ["sh", "-c", cmd]; running = false; running = true } }
-    Process { id: strikeRunner; function runScript(cmd) { command = ["sh", "-c", cmd]; running = false; running = true } }
-    Process { id: soundPlayer; function play(name) { command = ["canberra-gtk-play", "-i", name, "-V", theme.soundVolume]; running = false; running = true } }
+    Process {
+        id: autoQRunner
+        function runScript(cmd) {
+            command = ["sh", "-c", cmd]
+            running = false; running = true
+        }
+    }
+
+    Process {
+        id: strikeRunner
+        function runScript(cmd) {
+            command = ["sh", "-c", cmd]
+            running = false; running = true
+        }
+    }
 
     Process {
         id: loadCoordsProc
@@ -102,7 +129,9 @@ ShellRoot {
         }
     }
 
-    Process { id: saveCoordsProc }
+    Process {
+        id: saveCoordsProc
+    }
 
     function saveCoords() {
         var json = JSON.stringify({ zx: root.shiftZx, zy: root.shiftZy, xx: root.shiftXx, xy: root.shiftXy })
@@ -115,7 +144,22 @@ ShellRoot {
         loadCoordsProc.running = true
     }
 
-    // --- 🚀 視覺與動畫屬性 ---
+    GlobalShortcut {
+        name: "inspect_time"
+        onPressed: root.inspectMode = !root.inspectMode
+    }
+
+    readonly property int tickM1_H: root.isBoosted ? theme.boost_m1_h : theme.m1_h
+    readonly property int tickM1_W: root.isBoosted ? theme.boost_m1_w : theme.m1_w
+    readonly property int tickM5_H: root.isBoosted ? theme.boost_m5_h : theme.m5_h
+    readonly property int tickM5_W: root.isBoosted ? theme.boost_m5_w : theme.m5_w
+    readonly property int tickM10_H: root.isBoosted ? theme.boost_m10_h : theme.m10_h
+    readonly property int tickM10_W: root.isBoosted ? theme.boost_m10_w : theme.m10_w
+    readonly property int tickM30_H: root.isBoosted ? theme.boost_m30_h : theme.m30_h
+    readonly property int tickM30_W: root.isBoosted ? theme.boost_m30_w : theme.m30_w
+    readonly property int tickM60_H: root.isBoosted ? theme.boost_m60_h : theme.m60_h
+    readonly property int tickM60_W: root.isBoosted ? theme.boost_m60_w : theme.m60_w
+
     property real minuteBlink: 1.0
     SequentialAnimation on minuteBlink {
         loops: Animation.Infinite; running: true
@@ -154,19 +198,34 @@ ShellRoot {
         property real minuteProgress: 0.0
         property string fullTimeString: ""
         property string fullDateString: ""
+
         readonly property int totalMinutes: (currentHour % 12) * 60 + currentMinute
         readonly property int prevAnchorMin: Math.floor(totalMinutes / 30) * 30
         readonly property int nextAnchorMin: (prevAnchorMin + 30) % 720
     }
 
-    // --- 系統監控進程 ---
+    Process {
+        id: soundPlayer
+        function play(name) {
+            command = ["canberra-gtk-play", "-i", name, "-V", theme.soundVolume]
+            running = false; running = true
+        }
+    }
+
+    Connections {
+        target: Hyprland
+        function onFocusedWorkspaceChanged() {
+            soundPlayer.play(theme.soundClick)
+        }
+    }
+
     Process {
         id: wifiProcess
-        command: ["sh", "-c", "nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d: -f2 2>/dev/null || echo '未連接'"]
+        command: ["sh", "-c", "nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d: -f2 2>/dev/null || echo '未连接'"]
         stdout: StdioCollector {
             onStreamFinished: {
                 var s = text.trim()
-                root.currentWifi = s.length > 0 ? s : "未連接"
+                root.currentWifi = s.length > 0 ? s : "未连接"
             }
         }
     }
@@ -189,19 +248,23 @@ ShellRoot {
             var h = now.getHours()
             var m = now.getMinutes()
             var s = now.getSeconds()
+
             clock.currentHour = h % 12
             clock.currentMinute = m
             clock.currentSecond = s
             clock.minuteProgress = (m * 60 + s) / 3600.0
             clock.fullTimeString = Qt.formatDateTime(now, "hh:mm:ss")
             clock.fullDateString = Qt.formatDateTime(now, "yyyy-MM-dd dddd")
+
             if (root.chimeEnabled && m === 0 && s === 0 && root.lastChimedHour !== h) {
                 root.lastChimedHour = h
                 soundPlayer.play(theme.soundChime)
             }
+
             if (root.alarmEnabled && clock.currentHour === (root.alarmHour % 12) && m === root.alarmMinute && s === 0) {
                 soundPlayer.play(theme.soundAlarm)
             }
+
             if (s % 2 === 0) {
                 wifiProcess.running = false; wifiProcess.running = true
                 imeProcess.running = false; imeProcess.running = true
@@ -209,7 +272,6 @@ ShellRoot {
         }
     }
 
-    // --- 渲染組件 ---
     EdgeTop    { rootContext: root; themeContext: theme; clockContext: clock }
     EdgeRight  { rootContext: root; themeContext: theme; clockContext: clock }
     EdgeBottom { rootContext: root; themeContext: theme; clockContext: clock }

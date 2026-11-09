@@ -33,7 +33,7 @@ Variants {
                 }
             }
 
-            // 1. 前後雙燈塔錨點
+            // 前後雙燈塔錨點
             Repeater {
                 model: [clockContext.prevAnchorMin, clockContext.nextAnchorMin]
                 Rectangle {
@@ -52,7 +52,7 @@ Variants {
                 }
             }
 
-            // 2. 鬧鐘信標
+            // 鬧鐘信標
             Rectangle {
                 readonly property bool hasAlarm: rootContext.alarmEnabled && (rootContext.alarmHour % 12 >= 4 && rootContext.alarmHour % 12 <= 7)
                 visible: hasAlarm
@@ -67,7 +67,7 @@ Variants {
                 }
             }
 
-            // 3. 時針流體水滴
+            // 時針流體水滴
             Item {
                 id: bottomBeam
                 readonly property int totMin: clockContext.totalMinutes
@@ -99,7 +99,7 @@ Variants {
                         PathCubic {
                             x: bottomBeam.width; y: bottomBeam.height
                             control1X: bottomBeam.width * 0.3; control1Y: bottomBeam.height - (rootContext.boostGlow ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
-                            control2X: bottomBeam.width * 0.7; control2Y: bottomBeam.height - (rootContext.boostGglow ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
+                            control2X: bottomBeam.width * 0.7; control2Y: bottomBeam.height - (rootContext.boostGlow ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
                         }
                         PathLine { x: 0; y: bottomBeam.height }
                     }
@@ -114,37 +114,49 @@ Variants {
                         GradientStop { position: Math.max(0.05, 0.20 + rootContext.fluidShift); color: themeContext.geminiCoral }
                         GradientStop { position: Math.max(0.15, 0.38 + rootContext.fluidShift); color: themeContext.geminiGold }
                         GradientStop { position: Math.min(0.85, 0.50 + rootContext.fluidShift); color: themeContext.geminiWhite }
-                        GradientStop { position: Math.min(0.90, 0.62 + rootContext.fluidShift); color: themeContext.geminiPurple }
-                        GradientStop { position: Math.min(0.95, 0.80 + rootContext.fluidShift); color: themeContext.geminiCyan }
+                        GradientStop { position: Math.min(0.90, 0.62 + root.fluidShift); color: themeContext.geminiPurple }
+                        GradientStop { position: Math.min(0.95, 0.80 + root.fluidShift); color: themeContext.geminiCyan }
                         GradientStop { position: 1.0; color: "transparent" }
                     }
                 }
             }
 
-            // 4. 【底邊刻度矩陣】：修复版
+            // ========================================================
+            // 【底邊刻度矩陣】：巡天全開顯影 + 紅珀微星巨化 (唯一無重疊屬性)
+            // ========================================================
             Repeater {
                 model: 37
                 Rectangle {
-                    readonly property int targetAbsMin: index * 20 
+                    readonly property int deltaMin: index - 18
+                    readonly property int centerMinuteOnEdge: (clockContext.currentHour % 12 - 4) * 60 + clockContext.currentMinute
+                    readonly property int targetAbsMin: centerMinuteOnEdge + (index - 18)
                     readonly property int targetClockMin: ((targetAbsMin % 60) + 60) % 60
 
-                    x: (1.0 - (targetAbsMin / 720.0)) * bottomContainer.width - (width / 2.0)
+                    x: (1.0 - (targetAbsMin / 240.0)) * bottomContainer.width - (width / 2.0)
                     anchors.bottom: parent.bottom
 
                     readonly property real distToBeam: Math.abs(x + (width / 2.0) - (bottomBeam.x + bottomBeam.width / 2.0))
                     readonly property real distRatio: distToBeam / (bottomBeam.width / 2.0)
 
-                    visible: rootContext.inspectMode || (distRatio < 1.5)
-                    opacity: rootContext.inspectMode ? 1.0 : Math.max(0.1, (1.0 - distRatio * 0.8))
+                    readonly property bool inEdge: (targetAbsMin >= 0 && targetAbsMin <= 240)
+                    readonly property bool isSubMinute: (targetClockMin % 30 !== 0)
+
+                    // 唯一 visible 屬性：巡天模式下無條件全開！
+                    visible: rootContext.inspectMode || (inEdge && isSubMinute && (distRatio <= 0.85))
+
+                    // 唯一 opacity 屬性
+                    opacity: rootContext.inspectMode ? 0.85 : Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75)
 
                     width: (targetClockMin % 10 === 0) ? rootContext.tickM10_W : ((targetClockMin % 5 === 0) ? rootContext.tickM5_W : rootContext.tickM1_W)
-                    height: (targetClockMin % 10 === 0) ? rootContext.tickM10_H : ((targetClockMin % 5 === 0) ? rootContext.tickM5_H : rootContext.tickM1_H)
-                    color: (index === 18) ? themeContext.dotColor : themeContext.tickColor
+                    height: (targetClockMin % 10 === 0) ? rootContext.tickM10_H :
+                            ((targetClockMin % 5 === 0) ? rootContext.tickM5_H : rootContext.tickM1_H)
+                    color: (deltaMin === 0) ? themeContext.dotColor : themeContext.tickColor
                     antialiasing: false
 
+                    // 紅珀尋標微星：巡天模式下直徑瞬間擴展至 9px 巨星！
                     Rectangle {
                         visible: index === 18
-                        width: (rootContext.inspectMode || rootContext.boostGlow) ? themeContext.inspectDotSize : themeContext.dotSize
+                        width: rootContext.inspectMode ? themeContext.inspectDotSize : themeContext.dotSize
                         height: width
                         radius: width / 2.0
                         color: themeContext.dotColor

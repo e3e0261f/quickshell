@@ -565,14 +565,16 @@ Variants {
                                         spacing: 5; anchors.horizontalCenter: parent.horizontalCenter
                                         Text { text: "X:"; color: "#a1a1aa"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
                                         StepButton { symbol: "-"; direction: -1; onStepped: (delta) => rootContext.shiftZx = Math.max(0, rootContext.shiftZx + delta); onFinished: rootContext.saveCoords() }
-                                        TextInput { text: rootContext.shiftZx; color: "#ffffff"; font.family: "JetBrains Mono"; font.pixelSize: 11; width: 38; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; selectByMouse: true; validator: IntValidator { bottom: 0; top: 9999 }; onEditingFinished: { var v = parseInt(text); if (!isNaN(v)) { rootContext.shiftZx = v; rootContext.saveCoords() } } }
+                                        TextInput { text: rootContext.shiftZx; color: "#ffffff"; font.family: "JetBrains Mono"; font.pixelSize: 11; width: 38; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; selectByMouse: true; validator: IntValidator { bottom: 0; top: 9999 }
+                                         onEditingFinished: { var v = parseInt(text); if (!isNaN(v)) { rootContext.shiftZx = v; rootContext.saveCoords() } } }
                                         StepButton { symbol: "+"; direction: 1; onStepped: (delta) => rootContext.shiftZx += delta; onFinished: rootContext.saveCoords() }
 
                                         Item { width: 4; height: 1 }
 
                                         Text { text: "Y:"; color: "#a1a1aa"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
                                         StepButton { symbol: "-"; direction: -1; onStepped: (delta) => rootContext.shiftZy = Math.max(0, rootContext.shiftZy + delta); onFinished: rootContext.saveCoords() }
-                                        TextInput { text: rootContext.shiftZy; color: "#ffffff"; font.family: "JetBrains Mono"; font.pixelSize: 11; width: 38; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; selectByMouse: true; validator: IntValidator { bottom: 0; top: 9999 }; onEditingFinished: { var v = parseInt(text); if (!isNaN(v)) { rootContext.shiftZy = v; rootContext.saveCoords() } } }
+                                        TextInput { text: rootContext.shiftZy; color: "#ffffff"; font.family: "JetBrains Mono"; font.pixelSize: 11; width: 38; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; selectByMouse: true; validator: IntValidator { bottom: 0; top: 9999 }
+                                         onEditingFinished: { var v = parseInt(text); if (!isNaN(v)) { rootContext.shiftZy = v; rootContext.saveCoords() } } }
                                         StepButton { symbol: "+"; direction: 1; onStepped: (delta) => rootContext.shiftZy += delta; onFinished: rootContext.saveCoords() }
                                     }
                                 }
@@ -587,14 +589,16 @@ Variants {
                                         spacing: 5; anchors.horizontalCenter: parent.horizontalCenter
                                         Text { text: "X:"; color: "#a1a1aa"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
                                         StepButton { symbol: "-"; direction: -1; onStepped: (delta) => rootContext.shiftXx = Math.max(0, rootContext.shiftXx + delta); onFinished: rootContext.saveCoords() }
-                                        TextInput { text: rootContext.shiftXx; color: "#ffffff"; font.family: "JetBrains Mono"; font.pixelSize: 11; width: 38; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; selectByMouse: true; validator: IntValidator { bottom: 0; top: 9999 }; onEditingFinished: { var v = parseInt(text); if (!isNaN(v)) { rootContext.shiftXx = v; rootContext.saveCoords() } } }
+                                        TextInput { text: rootContext.shiftXx; color: "#ffffff"; font.family: "JetBrains Mono"; font.pixelSize: 11; width: 38; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; selectByMouse: true; validator: IntValidator { bottom: 0; top: 9999 }
+                                         onEditingFinished: { var v = parseInt(text); if (!isNaN(v)) { rootContext.shiftXx = v; rootContext.saveCoords() } } }
                                         StepButton { symbol: "+"; direction: 1; onStepped: (delta) => rootContext.shiftXx += delta; onFinished: rootContext.saveCoords() }
 
                                         Item { width: 4; height: 1 }
 
                                         Text { text: "Y:"; color: "#a1a1aa"; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
                                         StepButton { symbol: "-"; direction: -1; onStepped: (delta) => rootContext.shiftXy = Math.max(0, rootContext.shiftXy + delta); onFinished: rootContext.saveCoords() }
-                                        TextInput { text: rootContext.shiftXy; color: "#ffffff"; font.family: "JetBrains Mono"; font.pixelSize: 11; width: 38; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; selectByMouse: true; validator: IntValidator { bottom: 0; top: 9999 }; onEditingFinished: { var v = parseInt(text); if (!isNaN(v)) { rootContext.shiftXy = v; rootContext.saveCoords() } } }
+                                        TextInput { text: rootContext.shiftXy; color: "#ffffff"; font.family: "JetBrains Mono"; font.pixelSize: 11; width: 38; horizontalAlignment: Text.AlignHCenter; anchors.verticalCenter: parent.verticalCenter; selectByMouse: true; validator: IntValidator { bottom: 0; top: 9999 }
+                                         onEditingFinished: { var v = parseInt(text); if (!isNaN(v)) { rootContext.shiftXy = v; rootContext.saveCoords() } } }
                                         StepButton { symbol: "+"; direction: 1; onStepped: (delta) => rootContext.shiftXy += delta; onFinished: rootContext.saveCoords() }
                                     }
                                 }
@@ -633,12 +637,14 @@ Variants {
                             anchors.horizontalCenter: parent.horizontalCenter
                             Rectangle {
                                 width: 255; height: 38; radius: 8; color: "#27272a"; border.width: 1; border.color: "#3f3f46"
-                                Row { anchors.centerIn: parent; spacing: 8; Text { text: "🗺️"; font.pixelSize: 12 }; Text { text: "啟動 Albion 跑商助手"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true } }
+                                Row { anchors.centerIn: parent; spacing: 8; Text { text: "🗺️"; font.pixelSize: 12 }
+                                     Text { text: "啟動 Albion 跑商助手"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true } }
                                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: scriptRunner.runScript("xdg-open 'https://albiononline2d.com/'") }
                             }
                             Rectangle {
                                 width: 255; height: 38; radius: 8; color: "#27272a"; border.width: 1; border.color: "#3f3f46"
-                                Row { anchors.centerIn: parent; spacing: 8; Text { text: "⚔️"; font.pixelSize: 12 }; Text { text: "執行本地優化腳本"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true } }
+                                Row { anchors.centerIn: parent; spacing: 8; Text { text: "⚔️"; font.pixelSize: 12 }
+                                     Text { text: "執行本地優化腳本"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true } }
                                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: scriptRunner.runScript("notify-send '遊戲模式' '戰鬥環境已就緒'") }
                             }
                         }

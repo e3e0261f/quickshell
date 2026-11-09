@@ -1,17 +1,13 @@
 #!/bin/bash
 LOCK_FILE="/tmp/clicker.lock"
 ACTIVE_FILE="/tmp/clicker_active"
-BTN_FILE="/tmp/clicker_btn"
-
-rm -f "$LOCK_FILE" "$ACTIVE_FILE"
-echo "0xC0" > "$BTN_FILE"
 
 while true; do
+    # 只有当【总闸打开】且【按住快捷键】时，才开火！
     if [ -f "$ACTIVE_FILE" ] && [ -f "$LOCK_FILE" ]; then
-        BTN=$(cat "$BTN_FILE" 2>/dev/null || echo "0xC0")
-        ydotool click "$BTN"
-        sleep 0.05
+        ydotool click 0xC8  # 执行连点
+        sleep 0.05          # 连点速度（1秒20次）
     else
-        sleep 0.05
+        sleep 0.02          # 任何一个没满足，低消耗等待
     fi
 done
