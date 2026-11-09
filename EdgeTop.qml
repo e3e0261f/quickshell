@@ -11,6 +11,9 @@ Variants {
     model: Quickshell.screens
     PanelWindow {
         id: topWin
+
+        readonly property bool expandedMode:
+            rootContext.inspectMode || rootContext.boostGlow
         required property var modelData; screen: modelData
         anchors { top: true; left: true; right: true }
         

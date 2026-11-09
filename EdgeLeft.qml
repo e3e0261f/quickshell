@@ -11,6 +11,9 @@ Variants {
     model: Quickshell.screens
     PanelWindow {
         id: leftWin
+
+        readonly property bool expandedMode:
+            rootContext.inspectMode || rootContext.boostGlow
         required property var modelData; screen: modelData
         anchors { left: true; top: true; bottom: true }
         implicitWidth: rootContext.boostGlow ? 20 : themeContext.glowDepth
@@ -110,11 +113,11 @@ Variants {
                     gradient: Gradient {
                         orientation: Gradient.Vertical
                         GradientStop { position: 0.0; color: "transparent" }
-                        GradientStop { position: Math.max(0.05, 0.20 + root.fluidShift); color: themeContext.geminiCyan }
-                        GradientStop { position: Math.max(0.15, 0.38 + root.fluidShift); color: themeContext.geminiPurple }
-                        GradientStop { position: Math.min(0.85, 0.50 + root.fluidShift); color: themeContext.geminiWhite }
-                        GradientStop { position: Math.min(0.90, 0.62 + root.fluidShift); color: themeContext.geminiGold }
-                        GradientStop { position: Math.min(0.95, 0.80 + root.fluidShift); color: themeContext.geminiCoral }
+                        GradientStop { position: Math.max(0.05, 0.20 + rootContext.fluidShift); color: themeContext.geminiCyan }
+                        GradientStop { position: Math.max(0.15, 0.38 + rootContext.fluidShift); color: themeContext.geminiPurple }
+                        GradientStop { position: Math.min(0.85, 0.50 + rootContext.fluidShift); color: themeContext.geminiWhite }
+                        GradientStop { position: Math.min(0.90, 0.62 + rootContext.fluidShift); color: themeContext.geminiGold }
+                        GradientStop { position: Math.min(0.95, 0.80 + rootContext.fluidShift); color: themeContext.geminiCoral }
                         GradientStop { position: 1.0; color: "transparent" }
                     }
                 }
