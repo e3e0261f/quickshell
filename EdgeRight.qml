@@ -16,7 +16,7 @@ Variants {
             rootContext.inspectMode || rootContext.boostGlow
         required property var modelData; screen: modelData
         anchors { right: true; top: true; bottom: true }
-        implicitWidth: rootContext.boostGlow ? 20 : themeContext.glowDepth
+        implicitWidth: rightWin.expandedMode ? 20 : themeContext.glowDepth
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
         color: "transparent"
@@ -75,7 +75,7 @@ Variants {
                 visible: inRight
                 anchors.right: parent.right
                 width: rightContainer.width
-                height: rootContext.boostGlow ? themeContext.beamBoostLength : themeContext.beamBaseLength
+                height: rightWin.expandedMode ? themeContext.beamBoostLength : themeContext.beamBaseLength
 
                 y: {
                     var progress = (totMin - 120 + clockContext.currentSecond / 60.0) / 120.0
@@ -84,7 +84,7 @@ Variants {
 
                 Shape {
                     anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    width: rootContext.boostGlow ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
+                    width: rightWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
                     height: rightBeam.height
                     layer.enabled: true; layer.samples: 4
                     ShapePath {
@@ -98,9 +98,9 @@ Variants {
                         }
                         PathCubic {
                             x: rightBeam.width; y: rightBeam.height
-                            control1X: rightBeam.width - (rootContext.boostGlow ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
+                            control1X: rightBeam.width - (rightWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
                             control1Y: rightBeam.height * 0.3
-                            control2X: rightBeam.width - (rootContext.boostGlow ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
+                            control2X: rightBeam.width - (rightWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
                             control2Y: rightBeam.height * 0.7
                         }
                         PathLine { x: rightBeam.width; y: 0 }
@@ -109,7 +109,7 @@ Variants {
 
                 Rectangle {
                     anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    height: rightBeam.height * 0.85; width: rootContext.boostGlow ? 2 : 1
+                    height: rightBeam.height * 0.85; width: rightWin.expandedMode ? 2 : 1
                     gradient: Gradient {
                         orientation: Gradient.Vertical
                         GradientStop { position: 0.0; color: "transparent" }

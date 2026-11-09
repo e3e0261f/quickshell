@@ -18,7 +18,7 @@ Variants {
         anchors { top: true; left: true; right: true }
         
         // 核心修復：只要開啟巡天巨幕（inspectMode）或者點了 2x 按鈕，高度自動切換到 20px 放大模式
-        implicitHeight: (rootContext.inspectMode || rootContext.boostGlow) ? 20 : themeContext.glowDepth
+        implicitHeight: topWin.expandedMode ? 20 : themeContext.glowDepth
         
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
@@ -99,7 +99,7 @@ Variants {
                         readonly property real distRatio: Math.abs(xOffset) / (topBeam.width / 2.0)
                         readonly property bool isSubMinute: (targetMin % 30 !== 0)
 
-                        visible: isSubMinute && distRatio <= 0.78
+                        visible: isSubMinute && (rootContext.inspectMode || distRatio <= 0.78)
                         opacity: (deltaMin === 0) ? 1.0 : Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75)
 
                         anchors.top: parent.top
