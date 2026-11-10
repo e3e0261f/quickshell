@@ -94,7 +94,7 @@ Variants {
                     ShapePath {
                         strokeWidth: 0; fillColor: "transparent"; startX: 0; startY: bottomCurve.height
                         fillGradient: LinearGradient {
-                            x1: bottomBeam.width; y1: 0; x2: 0; y2: 0
+                            x1: bottomCurve.width; y1: 0; x2: 0; y2: 0
                             GradientStop { position: 0.0; color: "transparent" }
                             GradientStop { position: Math.max(0.1, 0.35 + rootContext.fluidShift); color: themeContext.geminiCoral }
                             GradientStop { position: Math.min(0.9, 0.65 + rootContext.fluidShift); color: themeContext.geminiGold }
