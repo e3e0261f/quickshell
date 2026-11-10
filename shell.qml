@@ -23,10 +23,14 @@ ShellRoot {
     property string currentWifi: "检测中..."
     property string currentIme: "EN"
 
+    // 打擊座標與鍵位配置
     property int shiftZx: 500
     property int shiftZy: 500
+    property string shiftZBtn: "0xC0"
+
     property int shiftXx: 800
     property int shiftXy: 500
+    property string shiftXBtn: "0xC0"
 
     property bool cursorReturnEnabled: true
     property string clickerButtonCode: "0xC0"
@@ -49,37 +53,11 @@ ShellRoot {
         }
     }
 
-
-        // 1. 用來控制 Q 鍵連發的定時器
-    Timer {
-        id: qSpamTimer
-        interval: 50 // 連發間隔時間 (毫秒)，50ms 代表每秒發送 20 次，可依需求調整
-        repeat: true
-        running: false
-        onTriggered: {
-            // 每 50 毫秒執行一次點擊 Q 鍵 (16:1 16:0)
-            // 這裡直接借用你寫好的環境變數或直接呼叫 ydotool
-            strikeRunner.runScript("YDOTOOL_SOCKET=/tmp/.ydotool_socket ydotool key 16:1 16:0")
-        }
-    }
-
-    // 2. 當實體 Q 鍵「按下」時觸發
     GlobalShortcut {
         name: "press_q"
         onPressed: {
-            // 如果你在 QuickShell 介面上有一個總開關（例如 root.qSpamEnabled）
-            // 可以加上 if (root.qSpamEnabled) 的判斷
-            if (!qSpamTimer.running) {
-                qSpamTimer.start()
-            }
-        }
-    }
-
-    // 3. 當實體 Q 鍵「放開」時觸發
-    GlobalShortcut {
-        name: "release_q"
-        onPressed: {
-            qSpamTimer.stop()
+            soundPlayer.play("bell")
+            strikeRunner.runScript("ydotool click 0xC0")
         }
     }
 
@@ -94,13 +72,14 @@ ShellRoot {
     GlobalShortcut {
         name: "strike_z"
         onPressed: {
+            var btn = root.shiftZBtn || "0xC0"
             var script = ""
             if (root.cursorReturnEnabled) {
                 script = "CUR=$(hyprctl cursorpos 2>/dev/null | tr -d ' '); CX=$(echo $CUR | cut -d, -f1); CY=$(echo $CUR | cut -d, -f2); " +
-                         "ydotool mousemove -a " + root.shiftZx + " " + root.shiftZy + " && ydotool click 0xC0; " +
+                         "ydotool mousemove -a " + root.shiftZx + " " + root.shiftZy + " && ydotool click " + btn + "; " +
                          "ydotool mousemove -a $CX $CY"
             } else {
-                script = "ydotool mousemove -a " + root.shiftZx + " " + root.shiftZy + " && ydotool click 0xC0"
+                script = "ydotool mousemove -a " + root.shiftZx + " " + root.shiftZy + " && ydotool click " + btn
             }
             soundPlayer.play("bell")
             strikeRunner.runScript(script)
@@ -110,13 +89,14 @@ ShellRoot {
     GlobalShortcut {
         name: "strike_x"
         onPressed: {
+            var btn = root.shiftXBtn || "0xC0"
             var script = ""
             if (root.cursorReturnEnabled) {
                 script = "CUR=$(hyprctl cursorpos 2>/dev/null | tr -d ' '); CX=$(echo $CUR | cut -d, -f1); CY=$(echo $CUR | cut -d, -f2); " +
-                         "ydotool mousemove -a " + root.shiftXx + " " + root.shiftXy + " && ydotool click 0xC0; " +
+                         "ydotool mousemove -a " + root.shiftXx + " " + root.shiftXy + " && ydotool click " + btn + "; " +
                          "ydotool mousemove -a $CX $CY"
             } else {
-                script = "ydotool mousemove -a " + root.shiftXx + " " + root.shiftXy + " && ydotool click 0xC0"
+                script = "ydotool mousemove -a " + root.shiftXx + " " + root.shiftXy + " && ydotool click " + btn
             }
             soundPlayer.play("bell")
             strikeRunner.runScript(script)
@@ -147,17 +127,24 @@ ShellRoot {
         }
     }
 
+    // 讀取持久化配置（座標、鍵位、開關）
     Process {
         id: loadCoordsProc
-        command: ["sh", "-c", "cat ~/.config/quickshell/coords.json 2>/dev/null || echo '{\"zx\":500,\"zy\":500,\"xx\":800,\"xy\":500}'"]
+        command: ["sh", "-c", "cat ~/.config/quickshell/coords.json 2>/dev/null || echo '{}'"]
         stdout: StdioCollector {
             onStreamFinished: {
                 try {
                     var d = JSON.parse(text)
                     if (d.zx !== undefined) root.shiftZx = d.zx
                     if (d.zy !== undefined) root.shiftZy = d.zy
+                    if (d.zbtn !== undefined) root.shiftZBtn = d.zbtn
+
                     if (d.xx !== undefined) root.shiftXx = d.xx
                     if (d.xy !== undefined) root.shiftXy = d.xy
+                    if (d.xbtn !== undefined) root.shiftXBtn = d.xbtn
+
+                    if (d.snap !== undefined) root.cursorReturnEnabled = d.snap
+                    if (d.clickerBtn !== undefined) root.clickerButtonCode = d.clickerBtn
                 } catch(e) {}
             }
         }
@@ -167,8 +154,15 @@ ShellRoot {
         id: saveCoordsProc
     }
 
+    // 寫入持久化配置
     function saveCoords() {
-        var json = JSON.stringify({ zx: root.shiftZx, zy: root.shiftZy, xx: root.shiftXx, xy: root.shiftXy })
+        var data = {
+            zx: root.shiftZx, zy: root.shiftZy, zbtn: root.shiftZBtn,
+            xx: root.shiftXx, xy: root.shiftXy, xbtn: root.shiftXBtn,
+            snap: root.cursorReturnEnabled,
+            clickerBtn: root.clickerButtonCode
+        }
+        var json = JSON.stringify(data)
         saveCoordsProc.command = ["sh", "-c", "echo '" + json + "' > ~/.config/quickshell/coords.json"]
         saveCoordsProc.running = false
         saveCoordsProc.running = true

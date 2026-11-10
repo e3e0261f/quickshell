@@ -543,8 +543,18 @@ Variants {
                                             Behavior on x { NumberAnimation { duration: 150 } }
                                         }
                                         MouseArea {
-                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                            onClicked: rootContext.autoQActive = !rootContext.autoQActive
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                rootContext.autoQActive = !rootContext.autoQActive
+        
+                                                // 新增這段：當開關切換時，動態建立/刪除暫存檔供 Lua 判斷
+                                                if (rootContext.autoQActive) {
+                                                    strikeRunner.runScript("touch /tmp/q_spam_enabled")
+                                                } else {
+                                                    strikeRunner.runScript("rm -f /tmp/q_spam_enabled")
+                                                }
+                                            }
                                         }
                                     }
                                 }
