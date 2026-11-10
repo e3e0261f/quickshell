@@ -49,6 +49,40 @@ ShellRoot {
         }
     }
 
+
+        // 1. 用來控制 Q 鍵連發的定時器
+    Timer {
+        id: qSpamTimer
+        interval: 50 // 連發間隔時間 (毫秒)，50ms 代表每秒發送 20 次，可依需求調整
+        repeat: true
+        running: false
+        onTriggered: {
+            // 每 50 毫秒執行一次點擊 Q 鍵 (16:1 16:0)
+            // 這裡直接借用你寫好的環境變數或直接呼叫 ydotool
+            strikeRunner.runScript("YDOTOOL_SOCKET=/tmp/.ydotool_socket ydotool key 16:1 16:0")
+        }
+    }
+
+    // 2. 當實體 Q 鍵「按下」時觸發
+    GlobalShortcut {
+        name: "press_q"
+        onPressed: {
+            // 如果你在 QuickShell 介面上有一個總開關（例如 root.qSpamEnabled）
+            // 可以加上 if (root.qSpamEnabled) 的判斷
+            if (!qSpamTimer.running) {
+                qSpamTimer.start()
+            }
+        }
+    }
+
+    // 3. 當實體 Q 鍵「放開」時觸發
+    GlobalShortcut {
+        name: "release_q"
+        onPressed: {
+            qSpamTimer.stop()
+        }
+    }
+
     GlobalShortcut {
         name: "toggle_clicker"
         onPressed: {
