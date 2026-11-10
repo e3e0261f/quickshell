@@ -81,7 +81,7 @@ Variants {
                 height: topContainer.height
                 
                 // 巡天模式或 2x 模式下，光束寬度自動采用 boostLength 放大
-                width: (rootContext.inspectMode || rootContext.boostGlow) ? themeContext.beamBoostLength : themeContext.beamBaseLength
+                width: topWin.expandedMode ? themeContext.beamBoostLength : themeContext.beamBaseLength
 
                 x: {
                     var normalizedM = (totMin >= 585) ? (totMin - 600) : (totMin + 120)
@@ -100,7 +100,7 @@ Variants {
                         readonly property bool isSubMinute: (targetMin % 30 !== 0)
 
                         visible: isSubMinute && (rootContext.inspectMode || distRatio <= 0.78)
-                        opacity: (deltaMin === 0) ? 1.0 : Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75)
+                        opacity: rootContext.inspectMode ? 0.85 : ((deltaMin === 0) ? 1.0 : Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75))
 
                         anchors.top: parent.top
                         x: (topBeam.width / 2.0) + xOffset - (width / 2.0)
@@ -113,8 +113,8 @@ Variants {
 
                         Rectangle {
                             visible: deltaMin === 0
-                            width: themeContext.dotSize
-                            height: themeContext.dotSize
+                            width: rootContext.inspectMode ? themeContext.inspectDotSize : themeContext.dotSize
+                            height: rootContext.inspectMode ? themeContext.inspectDotSize : themeContext.dotSize
                             radius: width / 2.0
                             color: themeContext.dotColor
                             anchors.horizontalCenter: parent.horizontalCenter
@@ -127,7 +127,7 @@ Variants {
                 Shape {
                     anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter
                     width: topBeam.width
-                    height: (rootContext.inspectMode || rootContext.boostGlow) ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
+                    height: topWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
                     layer.enabled: true; layer.samples: 4
                     ShapePath {
                         strokeWidth: 0; fillColor: "transparent"; startX: 0; startY: 0
@@ -141,9 +141,9 @@ Variants {
                         PathCubic {
                             x: topBeam.width; y: 0
                             control1X: topBeam.width * 0.3
-                            control1Y: (rootContext.inspectMode || rootContext.boostGlow) ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
+                            control1Y: topWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
                             control2X: topBeam.width * 0.7
-                            control2Y: (rootContext.inspectMode || rootContext.boostGlow) ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
+                            control2Y: topWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
                         }
                         PathLine { x: 0; y: 0 }
                     }
@@ -152,7 +152,7 @@ Variants {
                 Rectangle {
                     anchors.top: parent.top; anchors.horizontalCenter: parent.horizontalCenter
                     width: topBeam.width * 0.85
-                    height: (rootContext.inspectMode || rootContext.boostGlow) ? 2 : 1
+                    height: topWin.expandedMode ? 2 : 1
                     gradient: Gradient {
                         orientation: Gradient.Horizontal
                         GradientStop { position: 0.0; color: "transparent" }

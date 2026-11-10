@@ -83,12 +83,13 @@ Variants {
                 }
 
                 Shape {
+                    id: rightCurve
                     anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
                     width: rightWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
                     height: rightBeam.height
                     layer.enabled: true; layer.samples: 4
                     ShapePath {
-                        strokeWidth: 0; fillColor: "transparent"; startX: rightBeam.width; startY: 0
+                        strokeWidth: 0; fillColor: "transparent"; startX: rightCurve.width; startY: 0
                         fillGradient: LinearGradient {
                             x1: 0; y1: 0; x2: 0; y2: rightBeam.height
                             GradientStop { position: 0.0; color: "transparent" }
@@ -97,13 +98,13 @@ Variants {
                             GradientStop { position: 1.0; color: "transparent" }
                         }
                         PathCubic {
-                            x: rightBeam.width; y: rightBeam.height
-                            control1X: rightBeam.width - (rightWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
+                            x: rightCurve.width; y: rightCurve.height
+                            control1X: 0
                             control1Y: rightBeam.height * 0.3
-                            control2X: rightBeam.width - (rightWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
+                            control2X: 0
                             control2Y: rightBeam.height * 0.7
                         }
-                        PathLine { x: rightBeam.width; y: 0 }
+                        PathLine { x: rightCurve.width; y: 0 }
                     }
                 }
 
@@ -139,8 +140,8 @@ Variants {
 
                     readonly property bool inEdge: (targetAbsMin >= 0 && targetAbsMin <= 120)
                     readonly property bool isSubMinute: (targetClockMin % 30 !== 0)
-                    visible: inEdge && isSubMinute && (distRatio <= 0.85)
-                    opacity: Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75)
+                    visible: inEdge && isSubMinute && (rootContext.inspectMode || distRatio <= 0.85)
+                    opacity: rootContext.inspectMode ? 0.85 : Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75)
 
                     width: (targetClockMin % 10 === 0) ? rootContext.tickM10_H :
                             ((targetClockMin % 5 === 0) ? rootContext.tickM5_H : rootContext.tickM1_H)
@@ -150,8 +151,8 @@ Variants {
 
                     Rectangle {
                         visible: index === 18
-                        width: themeContext.dotSize
-                        height: themeContext.dotSize
+                        width: rootContext.inspectMode ? themeContext.inspectDotSize : themeContext.dotSize
+                        height: rootContext.inspectMode ? themeContext.inspectDotSize : themeContext.dotSize
                         radius: width / 2.0
                         color: themeContext.dotColor
                         anchors.verticalCenter: parent.verticalCenter

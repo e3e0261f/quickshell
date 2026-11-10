@@ -139,8 +139,8 @@ Variants {
 
                     readonly property bool inEdge: (targetAbsMin >= 0 && targetAbsMin <= 120)
                     readonly property bool isSubMinute: (targetClockMin % 30 !== 0)
-                    visible: inEdge && isSubMinute && (distRatio <= 0.85)
-                    opacity: Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75)
+                    visible: inEdge && isSubMinute && (rootContext.inspectMode || distRatio <= 0.85)
+                    opacity: rootContext.inspectMode ? 0.85 : Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75)
 
                     width: (targetClockMin % 10 === 0) ? rootContext.tickM10_H :
                             ((targetClockMin % 5 === 0) ? rootContext.tickM5_H : rootContext.tickM1_H)
@@ -150,8 +150,8 @@ Variants {
 
                     Rectangle {
                         visible: index === 18
-                        width: themeContext.dotSize
-                        height: themeContext.dotSize
+                        width: rootContext.inspectMode ? themeContext.inspectDotSize : themeContext.dotSize
+                        height: rootContext.inspectMode ? themeContext.inspectDotSize : themeContext.dotSize
                         radius: width / 2.0
                         color: themeContext.dotColor
                         anchors.verticalCenter: parent.verticalCenter

@@ -86,12 +86,13 @@ Variants {
                 }
 
                 Shape {
+                    id: bottomCurve
                     anchors.bottom: parent.bottom; anchors.horizontalCenter: parent.horizontalCenter
                     width: bottomBeam.width
                     height: bottomWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight
                     layer.enabled: true; layer.samples: 4
                     ShapePath {
-                        strokeWidth: 0; fillColor: "transparent"; startX: 0; startY: bottomBeam.height
+                        strokeWidth: 0; fillColor: "transparent"; startX: 0; startY: bottomCurve.height
                         fillGradient: LinearGradient {
                             x1: bottomBeam.width; y1: 0; x2: 0; y2: 0
                             GradientStop { position: 0.0; color: "transparent" }
@@ -100,11 +101,11 @@ Variants {
                             GradientStop { position: 1.0; color: "transparent" }
                         }
                         PathCubic {
-                            x: bottomBeam.width; y: bottomBeam.height
-                            control1X: bottomBeam.width * 0.3; control1Y: bottomBeam.height - (bottomWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
-                            control2X: bottomBeam.width * 0.7; control2Y: bottomBeam.height - (bottomWin.expandedMode ? themeContext.beamBoostCurveHeight : themeContext.beamBaseCurveHeight)
+                            x: bottomCurve.width; y: bottomCurve.height
+                            control1X: bottomCurve.width * 0.3; control1Y: 0
+                            control2X: bottomCurve.width * 0.7; control2Y: 0
                         }
-                        PathLine { x: 0; y: bottomBeam.height }
+                        PathLine { x: 0; y: bottomCurve.height }
                     }
                 }
 
@@ -145,7 +146,7 @@ Variants {
                     readonly property bool isSubMinute: (targetClockMin % 30 !== 0)
 
                     // 唯一 visible 屬性：巡天模式下無條件全開！
-                    visible: rootContext.inspectMode || (inEdge && isSubMinute && (distRatio <= 0.85))
+                    visible: inEdge && isSubMinute && (rootContext.inspectMode || distRatio <= 0.85)
 
                     // 唯一 opacity 屬性
                     opacity: rootContext.inspectMode ? 0.85 : Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75)
