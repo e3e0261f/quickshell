@@ -25,7 +25,7 @@ Variants {
         WlrLayershell.layer: WlrLayer.Overlay
         color: "transparent"
 
-        // 專屬系統指令執行器 (具備完全的 sh 執行能力)
+        // 專屬系統指令執行器
         Process {
             id: cmdRunner
             function run(cmd) {
@@ -61,6 +61,10 @@ Variants {
             hoverEnabled: true
             onEntered: {
                 timerBL.stop()
+                // 鼠標移入時，若在定時睡眠模式，重置倒計時為 15 分鐘
+                if (rootContext && !rootContext.caffeineActive) {
+                    rootContext.sleepCountdown = 900
+                }
                 if (!winBL.isOpen) {
                     winBL.isOpen = true
                     winBL.isLocked = true
@@ -117,34 +121,78 @@ Variants {
                         }
                     }
 
-                    // 2. 艙一：☕ 咖啡因 / 15分鐘定時睡眠雙模膠囊
+                    // 2. 艙一：☕ 咖啡因 / 15分鐘定時睡眠雙模膠囊 (帶右側跳動倒計時)
                     Rectangle {
-                        width: parent.width; height: 36; radius: 8
-                        color: "#18181b"; border.width: 1
+                        width: parent.width
+                        height: 36
+                        radius: 8
+                        color: "#18181b"
+                        border.width: 1
                         border.color: rootContext.caffeineActive ? themeContext.geminiGold : themeContext.geminiCyan
 
                         Row {
-                            anchors.centerIn: parent; spacing: 12
+                            anchors.centerIn: parent
+                            spacing: 10
+
                             Text {
                                 text: rootContext.caffeineActive ? "☕ 破曉無眠 (常亮)" : "🌙 漏刻入眠 (15分睡眠)"
                                 color: rootContext.caffeineActive ? themeContext.geminiGold : themeContext.geminiCyan
-                                font.pixelSize: 11; font.bold: true
+                                font.pixelSize: 11
+                                font.bold: true
+                                anchors.verticalCenter: parent.verticalCenter
                             }
+
+                            // 滑動開關按鈕
                             Rectangle {
-                                width: 34; height: 18; radius: 9
+                                width: 34
+                                height: 18
+                                radius: 9
                                 color: rootContext.caffeineActive ? themeContext.geminiGold : "#3f3f46"
+                                anchors.verticalCenter: parent.verticalCenter
                                 Rectangle {
-                                    width: 14; height: 14; radius: 7; color: "#ffffff"
+                                    width: 14
+                                    height: 14
+                                    radius: 7
+                                    color: "#ffffff"
                                     anchors.verticalCenter: parent.verticalCenter
                                     x: rootContext.caffeineActive ? (parent.width - width - 2) : 2
                                     Behavior on x { NumberAnimation { duration: 150 } }
                                 }
                             }
+
+                            // 🌟 按鈕右側：15分鐘實時跳動倒計時徽章
+                            Rectangle {
+                                width: 48
+                                height: 20
+                                radius: 5
+                                color: rootContext.caffeineActive ? "#27272a" : "#164e63"
+                                border.width: 1
+                                border.color: rootContext.caffeineActive ? "#3f3f46" : themeContext.geminiCyan
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: {
+                                        if (rootContext.caffeineActive) return "∞";
+                                        var sec = rootContext.sleepCountdown || 900
+                                        var m = Math.floor(sec / 60)
+                                        var s = sec % 60
+                                        return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s)
+                                    }
+                                    color: rootContext.caffeineActive ? "#a1a1aa" : themeContext.geminiCyan
+                                    font.family: "JetBrains Mono"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                }
+                            }
                         }
+
                         MouseArea {
-                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 rootContext.caffeineActive = !rootContext.caffeineActive
+                                rootContext.sleepCountdown = 900
                                 rootContext.saveCoords()
                             }
                         }
@@ -152,31 +200,45 @@ Variants {
 
                     // 3. 艙二：🔊 系統主音量無級滑塊 & 靜音切換
                     Rectangle {
-                        width: parent.width; height: 38; radius: 8
-                        color: "#18181b"; border.width: 1; border.color: "#27272a"
+                        width: parent.width
+                        height: 38
+                        radius: 8
+                        color: "#18181b"
+                        border.width: 1
+                        border.color: "#27272a"
 
                         Row {
-                            anchors.fill: parent; anchors.margins: 8; spacing: 10
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 10
+
                             Text {
                                 text: rootContext.systemMuted ? "🔇" : "🔊"
-                                font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter
+                                font.pixelSize: 14
+                                anchors.verticalCenter: parent.verticalCenter
                                 MouseArea {
-                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
                                     onClicked: volControl.toggleMute()
                                 }
                             }
                             Rectangle {
                                 id: volTrack
-                                width: parent.width - 78; height: 6; radius: 3
-                                color: "#27272a"; anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - 78
+                                height: 6
+                                radius: 3
+                                color: "#27272a"
+                                anchors.verticalCenter: parent.verticalCenter
                                 Rectangle {
                                     width: volTrack.width * (rootContext.systemVolume / 100.0)
-                                    height: parent.height; radius: 3
+                                    height: parent.height
+                                    radius: 3
                                     color: rootContext.systemMuted ? "#71717a" : themeContext.geminiCyan
                                     Behavior on width { NumberAnimation { duration: 80 } }
                                 }
                                 MouseArea {
-                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
                                     onPositionChanged: (mouse) => {
                                         var pct = Math.round(Math.max(0, Math.min(100, (mouse.x / volTrack.width) * 100)))
                                         volControl.setVol(pct)
@@ -189,99 +251,147 @@ Variants {
                             }
                             Text {
                                 text: rootContext.systemVolume + "%"
-                                color: "#a1a1aa"; font.family: "JetBrains Mono"; font.pixelSize: 10; font.bold: true
+                                color: "#a1a1aa"
+                                font.family: "JetBrains Mono"
+                                font.pixelSize: 10
+                                font.bold: true
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                         }
                     }
 
-                    // 4. 艙三：📶 Wi-Fi 硬件射頻開關 + ⌨ 輸入法切換
+                    // 4. 艙三：📶 Wi-Fi 真正切換連接 + ⌨ 輸入法
                     Row {
                         spacing: 10
                         anchors.horizontalCenter: parent.horizontalCenter
 
-                        // Wi-Fi 藥丸：點擊切換射頻開關
+                        // 🌟 Wi-Fi 藥丸：點擊彈出浮動熱點管理面板，直接選網連接！
                         Rectangle {
-                            width: 160; height: 32; radius: 8
-                            color: "#27272a"; border.width: 1; border.color: "#3f3f46"
+                            width: 160
+                            height: 32
+                            radius: 8
+                            color: "#27272a"
+                            border.width: 1
+                            border.color: rootContext.currentWifi !== "未连接" ? themeContext.geminiGold : "#3f3f46"
+
                             Row {
-                                anchors.centerIn: parent; spacing: 6
+                                anchors.centerIn: parent
+                                spacing: 6
                                 Text { text: "📶"; font.pixelSize: 11 }
                                 Text {
                                     text: rootContext.currentWifi
-                                    color: "#e4e4e7"; font.pixelSize: 10; font.bold: true
-                                    elide: Text.ElideRight; width: 115
+                                    color: "#e4e4e7"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                    width: 115
                                 }
                             }
                             MouseArea {
-                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    cmdRunner.run("if nmcli radio wifi | grep -q 'enabled'; then nmcli radio wifi off; else nmcli radio wifi on; fi")
+                                    // 自動探測當前可用的終端，以 Hyprland 浮動居中窗口彈出熱點選擇器
+                                    cmdRunner.run("TERM_BIN=$(command -v kitty || command -v alacritty || command -v foot || command -v wezterm || echo 'xterm'); hyprctl dispatch exec \"[float; size 600 500; center] $TERM_BIN -e nmtui-connect\" 2>/dev/null || nm-connection-editor 2>/dev/null || nmtui")
                                 }
                             }
                         }
 
-                        // 輸入法藥丸：點擊切換中英文 (fcitx5)
+                        // 輸入法藥丸：點擊切換中英文
                         Rectangle {
-                            width: 160; height: 32; radius: 8
-                            color: "#27272a"; border.width: 1; border.color: themeContext.geminiCyan
+                            width: 160
+                            height: 32
+                            radius: 8
+                            color: "#27272a"
+                            border.width: 1
+                            border.color: themeContext.geminiCyan
+
                             Row {
-                                anchors.centerIn: parent; spacing: 6
+                                anchors.centerIn: parent
+                                spacing: 6
                                 Text { text: "⌨"; font.pixelSize: 12; color: themeContext.geminiCyan }
                                 Text {
                                     text: rootContext.currentIme
-                                    color: "#e4e4e7"; font.pixelSize: 10; font.bold: true
+                                    color: "#e4e4e7"
+                                    font.pixelSize: 10
+                                    font.bold: true
                                 }
                             }
                             MouseArea {
-                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    cmdRunner.run("fcitx5-remote -t")
-                                }
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: cmdRunner.run("fcitx5-remote -t")
                             }
                         }
                     }
 
-                    // 5. 艙四：WORKSPACES 魔術區 (保留原汁原味)
+                    // 5. 艙四：WORKSPACES 魔術區
                     Rectangle {
-                        width: parent.width; height: 64; radius: 10
-                        color: "#18181b"; border.width: 1; border.color: "#27272a"
+                        width: parent.width
+                        height: 64
+                        radius: 10
+                        color: "#18181b"
+                        border.width: 1
+                        border.color: "#27272a"
+
                         Column {
-                            anchors.centerIn: parent; spacing: 6
+                            anchors.centerIn: parent
+                            spacing: 6
                             Row {
-                                spacing: 12; anchors.horizontalCenter: parent.horizontalCenter
-                                Text { text: "WORKSPACES"; color: "#71717a"; font.pixelSize: 9; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+                                spacing: 12
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                Text {
+                                    text: "WORKSPACES"
+                                    color: "#71717a"
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
                                 Rectangle {
-                                    width: 72; height: 18; radius: 9; color: "#2e1065"; border.width: 1; border.color: themeContext.geminiPurple
+                                    width: 72
+                                    height: 18
+                                    radius: 9
+                                    color: "#2e1065"
+                                    border.width: 1
+                                    border.color: themeContext.geminiPurple
                                     Row {
-                                        anchors.centerIn: parent; spacing: 4
+                                        anchors.centerIn: parent
+                                        spacing: 4
                                         Text { text: "✦"; color: themeContext.geminiPurple; font.pixelSize: 9 }
                                         Text { text: "魔术区"; color: "#f3e8ff"; font.pixelSize: 9; font.bold: true }
                                     }
                                     MouseArea {
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: { Hyprland.dispatch("togglespecialworkspace magic") }
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: Hyprland.dispatch("togglespecialworkspace magic")
                                     }
                                 }
                             }
 
                             Row {
-                                spacing: 6; anchors.horizontalCenter: parent.horizontalCenter
+                                spacing: 6
+                                anchors.horizontalCenter: parent.horizontalCenter
                                 Repeater {
                                     model: Hyprland.workspaces
                                     delegate: Rectangle {
                                         required property var modelData
-                                        width: modelData.focused ? 26 : 18; height: 18; radius: 9
+                                        width: modelData.focused ? 26 : 18
+                                        height: 18
+                                        radius: 9
                                         color: modelData.focused ? themeContext.geminiGold : "#3f3f46"
                                         Behavior on width { NumberAnimation { duration: 150 } }
                                         Behavior on color { ColorAnimation { duration: 150 } }
                                         Text {
-                                            anchors.centerIn: parent; text: modelData.id
-                                            color: modelData.focused ? "#18181b" : "#d4d4d8"; font.pixelSize: 9; font.bold: true
+                                            anchors.centerIn: parent
+                                            text: modelData.id
+                                            color: modelData.focused ? "#18181b" : "#d4d4d8"
+                                            font.pixelSize: 9
+                                            font.bold: true
                                         }
                                         MouseArea {
-                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                            onClicked: { modelData.activate() }
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: modelData.activate()
                                         }
                                     }
                                 }
@@ -289,30 +399,47 @@ Variants {
                         }
                     }
 
-                    // 6. 艙五：⚡ 電源速控舵 (立即睡眠 | 鎖定屏幕)
+                    // 6. 艙五：⚡ 電源速控舵
                     Row {
-                        spacing: 10; anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: 10
+                        anchors.horizontalCenter: parent.horizontalCenter
+
                         Rectangle {
-                            width: 160; height: 28; radius: 6; color: "#27272a"; border.width: 1; border.color: "#3f3f46"
+                            width: 160
+                            height: 28
+                            radius: 6
+                            color: "#27272a"
+                            border.width: 1
+                            border.color: "#3f3f46"
                             Row {
-                                anchors.centerIn: parent; spacing: 6
+                                anchors.centerIn: parent
+                                spacing: 6
                                 Text { text: "💤"; font.pixelSize: 11 }
                                 Text { text: "立即睡眠 (Suspend)"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true }
                             }
                             MouseArea {
-                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: cmdRunner.run("systemctl suspend")
                             }
                         }
+
                         Rectangle {
-                            width: 160; height: 28; radius: 6; color: "#27272a"; border.width: 1; border.color: "#3f3f46"
+                            width: 160
+                            height: 28
+                            radius: 6
+                            color: "#27272a"
+                            border.width: 1
+                            border.color: "#3f3f46"
                             Row {
-                                anchors.centerIn: parent; spacing: 6
+                                anchors.centerIn: parent
+                                spacing: 6
                                 Text { text: "🔒"; font.pixelSize: 11 }
                                 Text { text: "鎖定屏幕 (Lock)"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true }
                             }
                             MouseArea {
-                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
                                 onClicked: cmdRunner.run("hyprlock || swaylock || loginctl lock-session")
                             }
                         }
@@ -321,8 +448,11 @@ Variants {
                     // 7. 底部焦點窗口標題
                     Text {
                         text: Hyprland.activeToplevel ? ("● " + Hyprland.activeToplevel.title) : "● 桌面就绪 (Desktop Idle)"
-                        color: "#71717a"; font.pixelSize: 9; elide: Text.ElideRight
-                        width: parent.width; anchors.horizontalCenter: parent.horizontalCenter
+                        color: "#71717a"
+                        font.pixelSize: 9
+                        elide: Text.ElideRight
+                        width: parent.width
+                        anchors.horizontalCenter: parent.horizontalCenter
                     }
                 }
             }

@@ -25,6 +25,7 @@ ShellRoot {
 
     // 咖啡因與音量總線
     property bool caffeineActive: true
+    property int sleepCountdown: 900
     property int systemVolume: 50
     property bool systemMuted: false
 
@@ -323,6 +324,7 @@ ShellRoot {
     Timer {
         interval: 1000; running: true; repeat: true; triggeredOnStart: true
         onTriggered: {
+            if (!root.caffeineActive) { root.sleepCountdown = Math.max(0, root.sleepCountdown - 1); if (root.sleepCountdown === 0) { strikeRunner.runScript("systemctl suspend"); root.sleepCountdown = 900; } } else { root.sleepCountdown = 900; }
             var now = new Date()
             var h = now.getHours()
             var m = now.getMinutes()
