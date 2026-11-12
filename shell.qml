@@ -23,6 +23,19 @@ ShellRoot {
     property string currentWifi: "检测中..."
     property string currentIme: "EN"
 
+    // 咖啡因與音量總線
+    property bool caffeineActive: true
+    property int systemVolume: 50
+    property bool systemMuted: false
+
+    onCaffeineActiveChanged: {
+        if (caffeineActive) {
+            strikeRunner.runScript("touch /tmp/caffeine_active")
+        } else {
+            strikeRunner.runScript("rm -f /tmp/caffeine_active")
+        }
+    }
+
     // 打擊座標與鍵位配置
     property int shiftZx: 500
     property int shiftZy: 500
@@ -103,6 +116,39 @@ ShellRoot {
         }
     }
 
+    // 音量讀取進程 (支持 WirePlumber & PulseAudio)
+    Process {
+        id: volReader
+        command: ["sh", "-c", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || pamixer --get-volume 2>/dev/null || echo 'Volume: 0.50'"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var str = text.trim()
+                root.systemMuted = str.includes("MUTED")
+                var m = str.match(/([0-9]+(\.[0-9]+)?)/)
+                if (m) {
+                    var val = parseFloat(m[1])
+                    if (val <= 1.0) val = Math.round(val * 100)
+                    root.systemVolume = Math.min(100, Math.max(0, Math.round(val)))
+                }
+            }
+        }
+    }
+
+    // 音量寫入進程
+    Process {
+        id: volWriter
+        function setVol(pct) {
+            root.systemVolume = pct
+            command = ["sh", "-c", "wpctl set-volume @DEFAULT_AUDIO_SINK@ " + (pct / 100.0) + " 2>/dev/null || pamixer --set-volume " + pct]
+            running = false; running = true
+        }
+        function toggleMute() {
+            command = ["sh", "-c", "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle 2>/dev/null || pamixer -t"]
+            running = false; running = true
+            volReader.running = false; volReader.running = true
+        }
+    }
+
     Process {
         id: autoClickerRunner
         function runScript(cmd) {
@@ -127,7 +173,7 @@ ShellRoot {
         }
     }
 
-    // 讀取持久化配置（座標、鍵位、開關）
+    // 讀取持久化配置（座標、鍵位、開關、咖啡因）
     Process {
         id: loadCoordsProc
         command: ["sh", "-c", "cat ~/.config/quickshell/coords.json 2>/dev/null || echo '{}'"]
@@ -145,6 +191,7 @@ ShellRoot {
 
                     if (d.snap !== undefined) root.cursorReturnEnabled = d.snap
                     if (d.clickerBtn !== undefined) root.clickerButtonCode = d.clickerBtn
+                    if (d.caffeine !== undefined) root.caffeineActive = d.caffeine
                 } catch(e) {}
             }
         }
@@ -160,7 +207,8 @@ ShellRoot {
             zx: root.shiftZx, zy: root.shiftZy, zbtn: root.shiftZBtn,
             xx: root.shiftXx, xy: root.shiftXy, xbtn: root.shiftXBtn,
             snap: root.cursorReturnEnabled,
-            clickerBtn: root.clickerButtonCode
+            clickerBtn: root.clickerButtonCode,
+            caffeine: root.caffeineActive
         }
         var json = JSON.stringify(data)
         saveCoordsProc.command = ["sh", "-c", "echo '" + json + "' > ~/.config/quickshell/coords.json"]
@@ -170,6 +218,9 @@ ShellRoot {
 
     Component.onCompleted: {
         loadCoordsProc.running = true
+        volReader.running = true
+        // 確保睡眠守護進程在後台執行
+        strikeRunner.runScript("pgrep -f sleep_guard.sh >/dev/null || nohup ~/.config/quickshell/sleep_guard.sh >/dev/null 2>&1 &")
     }
 
     GlobalShortcut {
@@ -296,6 +347,7 @@ ShellRoot {
             if (s % 2 === 0) {
                 wifiProcess.running = false; wifiProcess.running = true
                 imeProcess.running = false; imeProcess.running = true
+                volReader.running = false; volReader.running = true
             }
         }
     }
@@ -305,7 +357,7 @@ ShellRoot {
     EdgeBottom { rootContext: root; themeContext: theme; clockContext: clock }
     EdgeLeft   { rootContext: root; themeContext: theme; clockContext: clock }
 
-    CornerBottomLeft  { rootContext: root; themeContext: theme; clockContext: clock }
+    CornerBottomLeft  { rootContext: root; themeContext: theme; clockContext: clock; volControl: volWriter }
     CornerBottomRight { rootContext: root; themeContext: theme; clockContext: clock; soundContext: soundPlayer }
     CenterInspect     { rootContext: root; themeContext: theme; clockContext: clock }
 }

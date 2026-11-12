@@ -18,6 +18,7 @@ Variants {
         anchors { left: true; top: true; bottom: true }
         implicitWidth: leftWin.expandedMode ? 20 : themeContext.glowDepth
         exclusionMode: ExclusionMode.Ignore
+        mask: Region {}
         WlrLayershell.layer: WlrLayer.Overlay
         color: "transparent"
 
