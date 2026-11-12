@@ -100,7 +100,7 @@ Column {
                     Column {
                         spacing: 2
                         Text {
-                            text: "鼠標連擊 (Shift+C)"
+                            text: "鼠標連擊 (Alt+C)"
                             color: "#ffffff"
                             font.pixelSize: 11
                             font.bold: true
@@ -291,7 +291,7 @@ Column {
                 spacing: 6
 
                 Text {
-                    text: "精確打擊 (Shift+Z)"
+                    text: "精確打擊 (Alt+Z)"
                     color: themeContext ? themeContext.geminiBlue : "#38bdf8"
                     font.pixelSize: 10
                     font.bold: true
@@ -488,7 +488,7 @@ Column {
                 spacing: 6
 
                 Text {
-                    text: "精確打擊 (Shift+X)"
+                    text: "精確打擊 (Alt+X)"
                     color: themeContext ? themeContext.geminiRose : "#fb7185"
                     font.pixelSize: 10
                     font.bold: true
