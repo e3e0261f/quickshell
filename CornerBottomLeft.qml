@@ -16,16 +16,28 @@ Variants {
         id: winBL
         required property var modelData; screen: modelData
         anchors { bottom: true; left: true }
+
         property bool isOpen: false
         property bool isLocked: false
 
+        // 抽屜展開狀態
+        property bool wifiExpanded: false
+        property bool btExpanded: false
+
+        // 藍牙狀態 (CONN|ON|OFF)
+        property string btState: "ON"
+        property string btName: "未連線"
+
+        // 寬度 360，高度隨抽屜展開自動彈性伸縮 (400 ~ 520)
         implicitWidth: isOpen ? 360 : themeContext.cornerSize
-        implicitHeight: isOpen ? 400 : themeContext.cornerSize
+        implicitHeight: isOpen ? (wifiExpanded ? 520 : (btExpanded ? 500 : 400)) : themeContext.cornerSize
+        Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
         color: "transparent"
 
-        // 專屬系統指令執行器
+        // 通用指令發射器
         Process {
             id: cmdRunner
             function run(cmd) {
@@ -34,14 +46,77 @@ Variants {
             }
         }
 
+        // 熱點掃描數據模型
+        ListModel { id: wifiListModel }
+
+        Process {
+            id: scanWifiProc
+            command: ["sh", "-c", "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | awk -F: '$2 != \"\"' | head -n 4"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    wifiListModel.clear()
+                    var lines = text.trim().split("\n")
+                    for (var i = 0; i < lines.length; i++) {
+                        if (!lines[i]) continue
+                        var parts = lines[i].split(":")
+                        if (parts.length >= 3) {
+                            wifiListModel.append({
+                                inUse: parts[0] === "*",
+                                ssid: parts[1],
+                                signal: parseInt(parts[2]) || 50,
+                                security: parts[3] || ""
+                            })
+                        }
+                    }
+                }
+            }
+        }
+
+        // 藍牙配對設備模型
+        ListModel { id: btListModel }
+
+        Process {
+            id: scanBtProc
+            command: ["sh", "-c", "bluetoothctl devices Paired 2>/dev/null | head -n 4"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    btListModel.clear()
+                    var lines = text.trim().split("\n")
+                    for (var i = 0; i < lines.length; i++) {
+                        if (!lines[i]) continue
+                        var p = lines[i].split(" ")
+                        if (p.length >= 3 && p[0] === "Device") {
+                            btListModel.append({
+                                mac: p[1],
+                                name: p.slice(2).join(" ")
+                            })
+                        }
+                    }
+                }
+            }
+        }
+
+        // 藍牙即時狀態監聽
+        Process {
+            id: btStatusProc
+            command: ["sh", "-c", "PWR=$(bluetoothctl show 2>/dev/null | grep -m1 'Powered:' | awk '{print $2}'); DEV=$(bluetoothctl devices Connected 2>/dev/null | head -n1 | cut -d ' ' -f 3-); if [ \"$PWR\" != \"yes\" ]; then echo 'OFF|已關閉'; elif [ -n \"$DEV\" ]; then echo \"CONN|$DEV\"; else echo 'ON|未連線'; fi"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    var parts = text.trim().split("|")
+                    if (parts.length >= 2) {
+                        winBL.btState = parts[0]
+                        winBL.btName = parts[1]
+                    }
+                }
+            }
+        }
+
         Timer {
             id: lockTimerBL
             interval: 450
             onTriggered: {
                 winBL.isLocked = false
-                if (!areaBL.containsMouse) {
-                    timerBL.restart()
-                }
+                if (!areaBL.containsMouse) timerBL.restart()
             }
         }
 
@@ -51,6 +126,8 @@ Variants {
             onTriggered: {
                 if (!winBL.isLocked) {
                     winBL.isOpen = false
+                    winBL.wifiExpanded = false
+                    winBL.btExpanded = false
                 }
             }
         }
@@ -61,7 +138,8 @@ Variants {
             hoverEnabled: true
             onEntered: {
                 timerBL.stop()
-                // 鼠標移入時，若在定時睡眠模式，重置倒計時為 15 分鐘
+                btStatusProc.running = false
+                btStatusProc.running = true
                 if (rootContext && !rootContext.caffeineActive) {
                     rootContext.sleepCountdown = 900
                 }
@@ -72,17 +150,12 @@ Variants {
                 }
             }
             onExited: {
-                if (!winBL.isLocked) {
-                    timerBL.restart()
-                }
+                if (!winBL.isLocked) timerBL.restart()
             }
 
             onWheel: (wheel) => {
-                if (wheel.angleDelta.y > 0) {
-                    Hyprland.dispatch("workspace e+1")
-                } else {
-                    Hyprland.dispatch("workspace e-1")
-                }
+                if (wheel.angleDelta.y > 0) Hyprland.dispatch("workspace e+1")
+                else Hyprland.dispatch("workspace e-1")
             }
 
             Rectangle {
@@ -121,7 +194,7 @@ Variants {
                         }
                     }
 
-                    // 2. 艙一：☕ 咖啡因 / 15分鐘定時睡眠雙模膠囊 (帶右側跳動倒計時)
+                    // 2. 艙一：☕ 咖啡因 / 15分鐘定時睡眠
                     Rectangle {
                         width: parent.width
                         height: 36
@@ -142,7 +215,6 @@ Variants {
                                 anchors.verticalCenter: parent.verticalCenter
                             }
 
-                            // 滑動開關按鈕
                             Rectangle {
                                 width: 34
                                 height: 18
@@ -160,7 +232,6 @@ Variants {
                                 }
                             }
 
-                            // 🌟 按鈕右側：15分鐘實時跳動倒計時徽章
                             Rectangle {
                                 width: 48
                                 height: 20
@@ -173,7 +244,7 @@ Variants {
                                 Text {
                                     anchors.centerIn: parent
                                     text: {
-                                        if (rootContext.caffeineActive) return "∞";
+                                        if (rootContext.caffeineActive) return "∞"
                                         var sec = rootContext.sleepCountdown || 900
                                         var m = Math.floor(sec / 60)
                                         var s = sec % 60
@@ -198,7 +269,7 @@ Variants {
                         }
                     }
 
-                    // 3. 艙二：🔊 系統主音量無級滑塊 & 靜音切換
+                    // 3. 艙二：🔊 系統主音量無級滑塊
                     Rectangle {
                         width: parent.width
                         height: 38
@@ -260,19 +331,19 @@ Variants {
                         }
                     }
 
-                    // 4. 艙三：📶 Wi-Fi 真正切換連接 + ⌨ 輸入法
+                    // 4. 艙三：通訊雙子星 (Wi-Fi 160 + 藍牙 160)
                     Row {
                         spacing: 10
                         anchors.horizontalCenter: parent.horizontalCenter
 
-                        // 🌟 Wi-Fi 藥丸：點擊彈出浮動熱點管理面板，直接選網連接！
+                        // 📶 Wi-Fi 膠囊
                         Rectangle {
                             width: 160
                             height: 32
                             radius: 8
-                            color: "#27272a"
+                            color: winBL.wifiExpanded ? "#1e1b4b" : "#27272a"
                             border.width: 1
-                            border.color: rootContext.currentWifi !== "未连接" ? themeContext.geminiGold : "#3f3f46"
+                            border.color: rootContext.currentWifi !== "未連接" ? themeContext.geminiGold : "#3f3f46"
 
                             Row {
                                 anchors.centerIn: parent
@@ -291,41 +362,186 @@ Variants {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    // 自動探測當前可用的終端，以 Hyprland 浮動居中窗口彈出熱點選擇器
-                                    cmdRunner.run('hyprctl dispatch exec "[float; size 650 500; center] kitty -e nmtui-connect"')
+                                    winBL.btExpanded = false
+                                    winBL.wifiExpanded = !winBL.wifiExpanded
+                                    if (winBL.wifiExpanded) {
+                                        scanWifiProc.running = false
+                                        scanWifiProc.running = true
+                                    }
                                 }
                             }
                         }
 
-                        // 輸入法藥丸：點擊切換中英文
+                        // ᛒ 藍牙膠囊 (CONN青藍 / ON待命 / OFF暗灰)
                         Rectangle {
                             width: 160
                             height: 32
                             radius: 8
-                            color: "#27272a"
+                            color: winBL.btExpanded ? "#2e1065" : "#27272a"
                             border.width: 1
-                            border.color: themeContext.geminiCyan
+                            border.color: (winBL.btState === "CONN") ? themeContext.geminiCyan : ((winBL.btState === "ON") ? themeContext.geminiPurple : "#3f3f46")
 
                             Row {
                                 anchors.centerIn: parent
                                 spacing: 6
-                                Text { text: "⌨"; font.pixelSize: 12; color: themeContext.geminiCyan }
                                 Text {
-                                    text: rootContext.currentIme
-                                    color: "#e4e4e7"
+                                    text: (winBL.btState === "CONN") ? "🎧" : "ᛒ"
+                                    font.pixelSize: 11
+                                    color: (winBL.btState === "CONN") ? themeContext.geminiCyan : "#a1a1aa"
+                                }
+                                Text {
+                                    text: winBL.btName
+                                    color: (winBL.btState === "CONN") ? "#ffffff" : "#a1a1aa"
                                     font.pixelSize: 10
                                     font.bold: true
+                                    elide: Text.ElideRight
+                                    width: 115
                                 }
                             }
                             MouseArea {
                                 anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: cmdRunner.run("fcitx5-remote -t")
+                                onClicked: (mouse) => {
+                                    if (mouse.button === Qt.RightButton) {
+                                        // 右鍵切換藍牙電源開關
+                                        cmdRunner.run("bluetoothctl show | grep -q 'Powered: yes' && bluetoothctl power off || bluetoothctl power on")
+                                        btStatusProc.running = false; btStatusProc.running = true
+                                    } else {
+                                        // 左鍵展開配對設備抽屜
+                                        winBL.wifiExpanded = false
+                                        winBL.btExpanded = !winBL.btExpanded
+                                        if (winBL.btExpanded) {
+                                            scanBtProc.running = false
+                                            scanBtProc.running = true
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // 5. 艙四：WORKSPACES 魔術區
+                    // 5. 原生抽屜：Wi-Fi 熱點雷達列表
+                    Rectangle {
+                        visible: winBL.wifiExpanded
+                        width: parent.width
+                        height: 115
+                        radius: 8
+                        color: "#18181b"
+                        border.width: 1
+                        border.color: themeContext.geminiGold
+                        clip: true
+
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 4
+
+                            Repeater {
+                                model: wifiListModel
+                                delegate: Rectangle {
+                                    width: parent.width
+                                    height: 24
+                                    radius: 4
+                                    color: model.inUse ? "#1e1b4b" : (itemArea.containsMouse ? "#27272a" : "transparent")
+                                    border.width: model.inUse ? 1 : 0
+                                    border.color: themeContext.geminiGold
+
+                                    Row {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 8
+                                        spacing: 8
+                                        Text { text: "📶"; font.pixelSize: 9 }
+                                        Text {
+                                            text: model.ssid
+                                            color: model.inUse ? themeContext.geminiGold : "#ffffff"
+                                            font.pixelSize: 10
+                                            font.bold: model.inUse
+                                            elide: Text.ElideRight
+                                            width: 190
+                                        }
+                                        Text { text: model.security ? "🔒" : ""; font.pixelSize: 9 }
+                                        Text { text: model.signal + "%"; color: "#71717a"; font.pixelSize: 8; font.family: "JetBrains Mono" }
+                                    }
+
+                                    MouseArea {
+                                        id: itemArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            // 點擊熱點直接切換連接
+                                            cmdRunner.run("nmcli connection up '" + model.ssid + "' 2>/dev/null || nmcli dev wifi connect '" + model.ssid + "'")
+                                            winBL.wifiExpanded = false
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 6. 原生抽屜：藍牙配對設備列表
+                    Rectangle {
+                        visible: winBL.btExpanded
+                        width: parent.width
+                        height: 95
+                        radius: 8
+                        color: "#18181b"
+                        border.width: 1
+                        border.color: themeContext.geminiPurple
+                        clip: true
+
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            spacing: 4
+
+                            Repeater {
+                                model: btListModel
+                                delegate: Rectangle {
+                                    width: parent.width
+                                    height: 24
+                                    radius: 4
+                                    color: (winBL.btName === model.name) ? "#2e1065" : (btItemArea.containsMouse ? "#27272a" : "transparent")
+                                    border.width: (winBL.btName === model.name) ? 1 : 0
+                                    border.color: themeContext.geminiPurple
+
+                                    Row {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 8
+                                        spacing: 8
+                                        Text { text: "🎧"; font.pixelSize: 9 }
+                                        Text {
+                                            text: model.name
+                                            color: (winBL.btName === model.name) ? themeContext.geminiCyan : "#ffffff"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                            width: 220
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: btItemArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            // 點擊已配對設備切換連接/斷開
+                                            cmdRunner.run("bluetoothctl info " + model.mac + " | grep -q 'Connected: yes' && bluetoothctl disconnect " + model.mac + " || bluetoothctl connect " + model.mac)
+                                            winBL.btExpanded = false
+                                            btStatusProc.running = false
+                                            btStatusProc.running = true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 7. 艙四：WORKSPACES 魔術區
                     Rectangle {
                         width: parent.width
                         height: 64
@@ -399,7 +615,7 @@ Variants {
                         }
                     }
 
-                    // 6. 艙五：⚡ 電源速控舵
+                    // 8. 艙五：⚡ 電源速控舵
                     Row {
                         spacing: 10
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -445,14 +661,47 @@ Variants {
                         }
                     }
 
-                    // 7. 底部焦點窗口標題
-                    Text {
-                        text: Hyprland.activeToplevel ? ("● " + Hyprland.activeToplevel.title) : "● 桌面就绪 (Desktop Idle)"
-                        color: "#71717a"
-                        font.pixelSize: 9
-                        elide: Text.ElideRight
+                    // 9. 底部焦點窗口 + ⌨ 輸入法無縫整合
+                    Row {
                         width: parent.width
-                        anchors.horizontalCenter: parent.horizontalCenter
+                        spacing: 8
+
+                        Text {
+                            text: Hyprland.activeToplevel ? ("● " + Hyprland.activeToplevel.title) : "● 桌面就绪 (Desktop Idle)"
+                            color: "#71717a"
+                            font.pixelSize: 9
+                            elide: Text.ElideRight
+                            width: parent.width - 88
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // 輸入法精巧微標籤 (點擊切換)
+                        Rectangle {
+                            width: 80
+                            height: 20
+                            radius: 5
+                            color: "#27272a"
+                            border.width: 1
+                            border.color: themeContext.geminiCyan
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 4
+                                Text { text: "⌨"; font.pixelSize: 9; color: themeContext.geminiCyan }
+                                Text {
+                                    text: rootContext.currentIme
+                                    color: "#e4e4e7"
+                                    font.pixelSize: 8
+                                    font.bold: true
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: cmdRunner.run("fcitx5-remote -t")
+                            }
+                        }
                     }
                 }
             }
