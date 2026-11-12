@@ -20,24 +20,33 @@ Variants {
         property bool isOpen: false
         property bool isLocked: false
 
-        // 抽屜展開狀態
-        property bool wifiExpanded: false
-        property bool btExpanded: false
+        // 中台視圖模式：0 = 默認(咖啡因+音量), 1 = Wi-Fi雷達, 2 = 藍牙中樞
+        property int stageMode: 0
+        property bool wifiScanning: false
+        property bool btScanning: false
 
-        // 藍牙狀態 (CONN|ON|OFF)
+        // 藍牙狀態
         property string btState: "ON"
         property string btName: "未連線"
+        property bool btDiscoverable: false
 
-        // 寬度 360，高度隨抽屜展開自動彈性伸縮 (400 ~ 520)
+        // 安全連接藍牙設備函數 (杜絕行內拼接引發語法分號錯誤)
+        function connectBt(mac) {
+            var cmd = "bluetoothctl info " + mac + " | grep -q 'Connected: yes' && bluetoothctl disconnect " + mac + " || (bluetoothctl pair " + mac + " 2>/dev/null; bluetoothctl trust " + mac + " 2>/dev/null; bluetoothctl connect " + mac + ")"
+            cmdRunner.run(cmd)
+            winBL.stageMode = 0
+            btStatusProc.running = false
+            btStatusProc.running = true
+        }
+
+        // 尺寸徹底鎖定在 360 x 425，絕對零閃爍、按鈕永不跑路
         implicitWidth: isOpen ? 360 : themeContext.cornerSize
-        implicitHeight: isOpen ? (wifiExpanded ? 520 : (btExpanded ? 500 : 400)) : themeContext.cornerSize
-        Behavior on implicitHeight { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+        implicitHeight: isOpen ? 425 : themeContext.cornerSize
 
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
         color: "transparent"
 
-        // 通用指令發射器
         Process {
             id: cmdRunner
             function run(cmd) {
@@ -46,12 +55,51 @@ Variants {
             }
         }
 
-        // 熱點掃描數據模型
+        // 🌟 任務欄數據源：實時獲取當前所有已開啟程序
+        ListModel { id: taskbarModel }
+
+        Process {
+            id: taskbarProc
+            command: ["sh", "-c", "hyprctl clients -j 2>/dev/null || echo '[]'"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    taskbarModel.clear()
+                    try {
+                        var clients = JSON.parse(text)
+                        for (var i = 0; i < clients.length; i++) {
+                            var c = clients[i]
+                            if (!c.class || c.class === "quickshell") continue
+                            taskbarModel.append({
+                                address: c.address,
+                                winClass: c.class,
+                                title: c.title || "",
+                                initialClass: c.initialClass || c.class
+                            })
+                        }
+                    } catch(e) {}
+                }
+            }
+        }
+
+        // 監聽 Hyprland 焦點或工作區變動，實時更新任務欄圖標
+        Connections {
+            target: Hyprland
+            function onActiveToplevelChanged() {
+                taskbarProc.running = false
+                taskbarProc.running = true
+            }
+            function onFocusedWorkspaceChanged() {
+                taskbarProc.running = false
+                taskbarProc.running = true
+            }
+        }
+
+        // 熱點掃描模型
         ListModel { id: wifiListModel }
 
         Process {
             id: scanWifiProc
-            command: ["sh", "-c", "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null | awk -F: '$2 != \"\"' | head -n 4"]
+            command: ["sh", "-c", "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list --rescan yes 2>/dev/null | awk -F: '$2 != \"\"' | head -n 4"]
             stdout: StdioCollector {
                 onStreamFinished: {
                     wifiListModel.clear()
@@ -68,16 +116,17 @@ Variants {
                             })
                         }
                     }
+                    winBL.wifiScanning = false
                 }
             }
         }
 
-        // 藍牙配對設備模型
+        // 藍牙已知設備模型
         ListModel { id: btListModel }
 
         Process {
             id: scanBtProc
-            command: ["sh", "-c", "bluetoothctl devices Paired 2>/dev/null | head -n 4"]
+            command: ["sh", "-c", "bluetoothctl devices 2>/dev/null | head -n 4"]
             stdout: StdioCollector {
                 onStreamFinished: {
                     btListModel.clear()
@@ -92,20 +141,61 @@ Variants {
                             })
                         }
                     }
+                    winBL.btScanning = false
                 }
             }
         }
 
-        // 藍牙即時狀態監聽
+        Process {
+            id: startScanBtProc
+            command: ["sh", "-c", "timeout 5 bluetoothctl scan on >/dev/null 2>&1; bluetoothctl devices 2>/dev/null | head -n 4"]
+            stdout: StdioCollector {
+                onStreamFinished: {
+                    btListModel.clear()
+                    var lines = text.trim().split("\n")
+                    for (var i = 0; i < lines.length; i++) {
+                        if (!lines[i]) continue
+                        var p = lines[i].split(" ")
+                        if (p.length >= 3 && p[0] === "Device") {
+                            btListModel.append({
+                                mac: p[1],
+                                name: p.slice(2).join(" ")
+                            })
+                        }
+                    }
+                    winBL.btScanning = false
+                }
+            }
+        }
+
         Process {
             id: btStatusProc
-            command: ["sh", "-c", "PWR=$(bluetoothctl show 2>/dev/null | grep -m1 'Powered:' | awk '{print $2}'); DEV=$(bluetoothctl devices Connected 2>/dev/null | head -n1 | cut -d ' ' -f 3-); if [ \"$PWR\" != \"yes\" ]; then echo 'OFF|已關閉'; elif [ -n \"$DEV\" ]; then echo \"CONN|$DEV\"; else echo 'ON|未連線'; fi"]
+            command: [
+                "sh", "-c",
+                "PWR=$(bluetoothctl show 2>/dev/null | grep -m1 'Powered:' | awk '{print $2}'); " +
+                "DISC=$(bluetoothctl show 2>/dev/null | grep -m1 'Discoverable:' | awk '{print $2}'); " +
+                "DEV=$(bluetoothctl devices Connected 2>/dev/null | head -n1 | cut -d ' ' -f 3-); " +
+                "echo \"$PWR|$DISC|$DEV\""
+            ]
             stdout: StdioCollector {
                 onStreamFinished: {
                     var parts = text.trim().split("|")
                     if (parts.length >= 2) {
-                        winBL.btState = parts[0]
-                        winBL.btName = parts[1]
+                        var pwr = parts[0]
+                        var disc = parts[1]
+                        var dev = parts[2] || ""
+                        winBL.btDiscoverable = (disc === "yes")
+
+                        if (pwr !== "yes") {
+                            winBL.btState = "OFF"
+                            winBL.btName = "已關閉"
+                        } else if (dev !== "") {
+                            winBL.btState = "CONN"
+                            winBL.btName = dev
+                        } else {
+                            winBL.btState = "ON"
+                            winBL.btName = "未連線"
+                        }
                     }
                 }
             }
@@ -126,8 +216,7 @@ Variants {
             onTriggered: {
                 if (!winBL.isLocked) {
                     winBL.isOpen = false
-                    winBL.wifiExpanded = false
-                    winBL.btExpanded = false
+                    winBL.stageMode = 0
                 }
             }
         }
@@ -140,6 +229,9 @@ Variants {
                 timerBL.stop()
                 btStatusProc.running = false
                 btStatusProc.running = true
+                taskbarProc.running = false
+                taskbarProc.running = true
+
                 if (rootContext && !rootContext.caffeineActive) {
                     rootContext.sleepCountdown = 900
                 }
@@ -194,154 +286,376 @@ Variants {
                         }
                     }
 
-                    // 2. 艙一：☕ 咖啡因 / 15分鐘定時睡眠
-                    Rectangle {
+                    // 2. 🌟 固定戰術中台 (固定高度 86px，向上擴展，絕對防抖)
+                    Item {
                         width: parent.width
-                        height: 36
-                        radius: 8
-                        color: "#18181b"
-                        border.width: 1
-                        border.color: rootContext.caffeineActive ? themeContext.geminiGold : themeContext.geminiCyan
+                        height: 86
+                        clip: true
 
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 10
-
-                            Text {
-                                text: rootContext.caffeineActive ? "☕ 破曉無眠 (常亮)" : "🌙 漏刻入眠 (15分睡眠)"
-                                color: rootContext.caffeineActive ? themeContext.geminiGold : themeContext.geminiCyan
-                                font.pixelSize: 11
-                                font.bold: true
-                                anchors.verticalCenter: parent.verticalCenter
-                            }
+                        // 態 0：默認態 (☕ 咖啡因雙模膠囊 + 🔊 音量滑軌)
+                        Column {
+                            anchors.fill: parent
+                            spacing: 8
+                            visible: winBL.stageMode === 0
 
                             Rectangle {
-                                width: 34
-                                height: 18
-                                radius: 9
-                                color: rootContext.caffeineActive ? themeContext.geminiGold : "#3f3f46"
-                                anchors.verticalCenter: parent.verticalCenter
-                                Rectangle {
-                                    width: 14
-                                    height: 14
-                                    radius: 7
-                                    color: "#ffffff"
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    x: rootContext.caffeineActive ? (parent.width - width - 2) : 2
-                                    Behavior on x { NumberAnimation { duration: 150 } }
-                                }
-                            }
-
-                            Rectangle {
-                                width: 48
-                                height: 20
-                                radius: 5
-                                color: rootContext.caffeineActive ? "#27272a" : "#164e63"
+                                width: parent.width
+                                height: 36
+                                radius: 8
+                                color: "#18181b"
                                 border.width: 1
-                                border.color: rootContext.caffeineActive ? "#3f3f46" : themeContext.geminiCyan
-                                anchors.verticalCenter: parent.verticalCenter
+                                border.color: rootContext.caffeineActive ? themeContext.geminiGold : themeContext.geminiCyan
 
-                                Text {
+                                Row {
                                     anchors.centerIn: parent
-                                    text: {
-                                        if (rootContext.caffeineActive) return "∞"
-                                        var sec = rootContext.sleepCountdown || 900
-                                        var m = Math.floor(sec / 60)
-                                        var s = sec % 60
-                                        return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s)
+                                    spacing: 10
+
+                                    Text {
+                                        text: rootContext.caffeineActive ? "☕ 破曉無眠 (常亮)" : "🌙 漏刻入眠 (15分睡眠)"
+                                        color: rootContext.caffeineActive ? themeContext.geminiGold : themeContext.geminiCyan
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                        anchors.verticalCenter: parent.verticalCenter
                                     }
-                                    color: rootContext.caffeineActive ? "#a1a1aa" : themeContext.geminiCyan
-                                    font.family: "JetBrains Mono"
-                                    font.pixelSize: 10
-                                    font.bold: true
+
+                                    Rectangle {
+                                        width: 34
+                                        height: 18
+                                        radius: 9
+                                        color: rootContext.caffeineActive ? themeContext.geminiGold : "#3f3f46"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        Rectangle {
+                                            width: 14
+                                            height: 14
+                                            radius: 7
+                                            color: "#ffffff"
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            x: rootContext.caffeineActive ? (parent.width - width - 2) : 2
+                                            Behavior on x { NumberAnimation { duration: 150 } }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 48
+                                        height: 20
+                                        radius: 5
+                                        color: rootContext.caffeineActive ? "#27272a" : "#164e63"
+                                        border.width: 1
+                                        border.color: rootContext.caffeineActive ? "#3f3f46" : themeContext.geminiCyan
+                                        anchors.verticalCenter: parent.verticalCenter
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: {
+                                                if (rootContext.caffeineActive) return "∞"
+                                                var sec = rootContext.sleepCountdown || 900
+                                                var m = Math.floor(sec / 60)
+                                                var s = sec % 60
+                                                return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s)
+                                            }
+                                            color: rootContext.caffeineActive ? "#a1a1aa" : themeContext.geminiCyan
+                                            font.family: "JetBrains Mono"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
+                                    }
                                 }
-                            }
-                        }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                rootContext.caffeineActive = !rootContext.caffeineActive
-                                rootContext.sleepCountdown = 900
-                                rootContext.saveCoords()
-                            }
-                        }
-                    }
-
-                    // 3. 艙二：🔊 系統主音量無級滑塊
-                    Rectangle {
-                        width: parent.width
-                        height: 38
-                        radius: 8
-                        color: "#18181b"
-                        border.width: 1
-                        border.color: "#27272a"
-
-                        Row {
-                            anchors.fill: parent
-                            anchors.margins: 8
-                            spacing: 10
-
-                            Text {
-                                text: rootContext.systemMuted ? "🔇" : "🔊"
-                                font.pixelSize: 14
-                                anchors.verticalCenter: parent.verticalCenter
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: volControl.toggleMute()
+                                    onClicked: {
+                                        rootContext.caffeineActive = !rootContext.caffeineActive
+                                        rootContext.sleepCountdown = 900
+                                        rootContext.saveCoords()
+                                    }
                                 }
                             }
+
+                            // 音量滑軌
                             Rectangle {
-                                id: volTrack
-                                width: parent.width - 78
-                                height: 6
-                                radius: 3
-                                color: "#27272a"
-                                anchors.verticalCenter: parent.verticalCenter
-                                Rectangle {
-                                    width: volTrack.width * (rootContext.systemVolume / 100.0)
-                                    height: parent.height
-                                    radius: 3
-                                    color: rootContext.systemMuted ? "#71717a" : themeContext.geminiCyan
-                                    Behavior on width { NumberAnimation { duration: 80 } }
-                                }
-                                MouseArea {
+                                width: parent.width
+                                height: 38
+                                radius: 8
+                                color: "#18181b"
+                                border.width: 1
+                                border.color: "#27272a"
+
+                                Row {
                                     anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onPositionChanged: (mouse) => {
-                                        var pct = Math.round(Math.max(0, Math.min(100, (mouse.x / volTrack.width) * 100)))
-                                        volControl.setVol(pct)
+                                    anchors.margins: 8
+                                    spacing: 10
+
+                                    Text {
+                                        text: rootContext.systemMuted ? "🔇" : "🔊"
+                                        font.pixelSize: 14
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: volControl.toggleMute()
+                                        }
                                     }
-                                    onClicked: (mouse) => {
-                                        var pct = Math.round(Math.max(0, Math.min(100, (mouse.x / volTrack.width) * 100)))
-                                        volControl.setVol(pct)
+                                    Rectangle {
+                                        id: volTrack
+                                        width: parent.width - 78
+                                        height: 6
+                                        radius: 3
+                                        color: "#27272a"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        Rectangle {
+                                            width: volTrack.width * (rootContext.systemVolume / 100.0)
+                                            height: parent.height
+                                            radius: 3
+                                            color: rootContext.systemMuted ? "#71717a" : themeContext.geminiCyan
+                                            Behavior on width { NumberAnimation { duration: 80 } }
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onPositionChanged: (mouse) => {
+                                                var pct = Math.round(Math.max(0, Math.min(100, (mouse.x / volTrack.width) * 100)))
+                                                volControl.setVol(pct)
+                                            }
+                                            onClicked: (mouse) => {
+                                                var pct = Math.round(Math.max(0, Math.min(100, (mouse.x / volTrack.width) * 100)))
+                                                volControl.setVol(pct)
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: rootContext.systemVolume + "%"
+                                        color: "#a1a1aa"
+                                        font.family: "JetBrains Mono"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        anchors.verticalCenter: parent.verticalCenter
                                     }
                                 }
                             }
-                            Text {
-                                text: rootContext.systemVolume + "%"
-                                color: "#a1a1aa"
-                                font.family: "JetBrains Mono"
-                                font.pixelSize: 10
-                                font.bold: true
-                                anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // 態 1：Wi-Fi 戰術雷達視圖
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 8
+                            color: "#18181b"
+                            border.width: 1
+                            border.color: themeContext.geminiGold
+                            visible: winBL.stageMode === 1
+
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 8
+                                visible: winBL.wifiScanning
+                                Text { text: "⏳"; font.pixelSize: 12 }
+                                Text { text: "正在雷達掃描周邊 Wi-Fi..."; color: themeContext.geminiGold; font.pixelSize: 10; font.bold: true }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: !winBL.wifiScanning && wifiListModel.count === 0
+
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: 8
+                                    Text { text: "📡"; font.pixelSize: 12 }
+                                    Text { text: "未發現可用熱點 (點擊重新探測)"; color: "#71717a"; font.pixelSize: 10 }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: { winBL.wifiScanning = true; scanWifiProc.running = true }
+                                }
+                            }
+
+
+                            Column {
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                spacing: 2
+                                visible: !winBL.wifiScanning && wifiListModel.count > 0
+
+                                Repeater {
+                                    model: wifiListModel
+                                    delegate: Rectangle {
+                                        width: parent.width
+                                        height: 18
+                                        radius: 3
+                                        color: model.inUse ? "#1e1b4b" : (itemArea.containsMouse ? "#27272a" : "transparent")
+
+                                        Row {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 6
+                                            spacing: 6
+                                            Text { text: "📶"; font.pixelSize: 8 }
+                                            Text {
+                                                text: model.ssid
+                                                color: model.inUse ? themeContext.geminiGold : "#ffffff"
+                                                font.pixelSize: 9
+                                                font.bold: model.inUse
+                                                elide: Text.ElideRight
+                                                width: 220
+                                            }
+                                            Text { text: model.security ? "🔒" : ""; font.pixelSize: 8 }
+                                            Text { text: model.signal + "%"; color: "#71717a"; font.pixelSize: 8; font.family: "JetBrains Mono" }
+                                        }
+
+                                        MouseArea {
+                                            id: itemArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                cmdRunner.run("nmcli connection up '" + model.ssid + "' 2>/dev/null || nmcli dev wifi connect '" + model.ssid + "'")
+                                                winBL.stageMode = 0
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // 態 2：藍牙全功能中樞視圖
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 8
+                            color: "#18181b"
+                            border.width: 1
+                            border.color: themeContext.geminiPurple
+                            visible: winBL.stageMode === 2
+
+                            Column {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 4
+
+                                Row {
+                                    width: parent.width - 12
+                                    anchors.horizontalCenter: parent.horizontalCenter
+
+                                    Row {
+                                        spacing: 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        Text { text: (winBL.btState !== "OFF") ? "⚡" : "💤"; font.pixelSize: 9 }
+                                        Text { text: (winBL.btState !== "OFF") ? "射頻開" : "射頻關"; color: (winBL.btState !== "OFF") ? themeContext.geminiPurple : "#71717a"; font.pixelSize: 9; font.bold: true }
+                                        Rectangle {
+                                            width: 26; height: 14; radius: 7; color: (winBL.btState !== "OFF") ? themeContext.geminiPurple : "#3f3f46"
+                                            Rectangle { width: 10; height: 10; radius: 5; color: "#ffffff"; anchors.verticalCenter: parent.verticalCenter; x: (winBL.btState !== "OFF") ? (parent.width - width - 2) : 2; Behavior on x { NumberAnimation { duration: 150 } } }
+                                            MouseArea {
+                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    if (winBL.btState !== "OFF") { cmdRunner.run("bluetoothctl power off"); winBL.btState = "OFF"; winBL.btName = "已關閉"; winBL.btDiscoverable = false }
+                                                    else { cmdRunner.run("bluetoothctl power on"); winBL.btState = "ON"; winBL.btName = "未連線" }
+                                                    btStatusProc.running = false; btStatusProc.running = true
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Item { width: 30; height: 1 }
+
+                                    Row {
+                                        spacing: 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: winBL.btState !== "OFF"
+                                        Text { text: winBL.btDiscoverable ? "📡" : "🙈"; font.pixelSize: 9 }
+                                        Text { text: winBL.btDiscoverable ? "廣播開" : "廣播隱"; color: winBL.btDiscoverable ? themeContext.geminiCyan : "#71717a"; font.pixelSize: 9; font.bold: true }
+                                        Rectangle {
+                                            width: 26; height: 14; radius: 7; color: winBL.btDiscoverable ? themeContext.geminiCyan : "#3f3f46"
+                                            Rectangle { width: 10; height: 10; radius: 5; color: "#ffffff"; anchors.verticalCenter: parent.verticalCenter; x: winBL.btDiscoverable ? (parent.width - width - 2) : 2; Behavior on x { NumberAnimation { duration: 150 } } }
+                                            MouseArea {
+                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    if (winBL.btDiscoverable) { cmdRunner.run("bluetoothctl discoverable off"); winBL.btDiscoverable = false }
+                                                    else { cmdRunner.run("bluetoothctl discoverable on"); winBL.btDiscoverable = true }
+                                                    btStatusProc.running = false; btStatusProc.running = true
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle { width: parent.width - 12; height: 1; color: "#27272a"; anchors.horizontalCenter: parent.horizontalCenter }
+
+                                Item {
+                                    width: parent.width
+                                    height: 48
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        visible: winBL.btState === "OFF"
+                                        text: "💤 藍牙硬件已休眠，開啟射頻後方可探測"
+                                        color: "#71717a"; font.pixelSize: 9
+                                    }
+
+                                    Column {
+                                        anchors.centerIn: parent
+                                        spacing: 3
+                                        visible: winBL.btState !== "OFF" && btListModel.count === 0
+
+                                        Text { text: winBL.btScanning ? "📡 正在探測周邊設備..." : "🎧 暫無配對設備"; color: winBL.btScanning ? themeContext.geminiCyan : "#a1a1aa"; font.pixelSize: 9; anchors.horizontalCenter: parent.horizontalCenter }
+                                        Rectangle {
+                                            width: 110; height: 20; radius: 10; color: "#27272a"; border.width: 1; border.color: themeContext.geminiPurple
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            Row { anchors.centerIn: parent; spacing: 4; Text { text: winBL.btScanning ? "⏳" : "🔍"; font.pixelSize: 8 } Text { text: winBL.btScanning ? "探測中..." : "掃描新設備"; color: "#f3e8ff"; font.pixelSize: 8; font.bold: true } }
+                                            MouseArea {
+                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                onClicked: { winBL.btScanning = true; startScanBtProc.running = false; startScanBtProc.running = true }
+                                            }
+                                        }
+                                    }
+
+                                    Column {
+                                        anchors.fill: parent
+                                        spacing: 2
+                                        visible: winBL.btState !== "OFF" && btListModel.count > 0
+
+                                        Repeater {
+                                            model: btListModel
+                                            delegate: Rectangle {
+                                                width: parent.width - 12
+                                                height: 20
+                                                radius: 3
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                color: (winBL.btName === model.name) ? "#2e1065" : (btItemArea.containsMouse ? "#27272a" : "transparent")
+
+                                                Row {
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 6
+                                                    spacing: 6
+                                                    Text { text: "🎧"; font.pixelSize: 8 }
+                                                    Text { text: model.name; color: (winBL.btName === model.name) ? themeContext.geminiCyan : "#ffffff"; font.pixelSize: 9; font.bold: true; elide: Text.ElideRight; width: 220 }
+                                                }
+
+                                                MouseArea {
+                                                    id: btItemArea
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: winBL.connectBt(model.mac)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
 
-                    // 4. 艙三：通訊雙子星 (Wi-Fi 160 + 藍牙 160)
+                    // 3. 🌟 通訊雙子星 (絕對固定！永不跑路！)
                     Row {
                         spacing: 10
                         anchors.horizontalCenter: parent.horizontalCenter
 
-                        // 📶 Wi-Fi 膠囊
                         Rectangle {
                             width: 160
                             height: 32
                             radius: 8
-                            color: winBL.wifiExpanded ? "#1e1b4b" : "#27272a"
+                            color: (winBL.stageMode === 1) ? "#1e1b4b" : "#27272a"
                             border.width: 1
                             border.color: rootContext.currentWifi !== "未連接" ? themeContext.geminiGold : "#3f3f46"
 
@@ -362,9 +676,11 @@ Variants {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
-                                    winBL.btExpanded = false
-                                    winBL.wifiExpanded = !winBL.wifiExpanded
-                                    if (winBL.wifiExpanded) {
+                                    if (winBL.stageMode === 1) {
+                                        winBL.stageMode = 0
+                                    } else {
+                                        winBL.stageMode = 1
+                                        winBL.wifiScanning = true
                                         scanWifiProc.running = false
                                         scanWifiProc.running = true
                                     }
@@ -372,12 +688,11 @@ Variants {
                             }
                         }
 
-                        // ᛒ 藍牙膠囊 (CONN青藍 / ON待命 / OFF暗灰)
                         Rectangle {
                             width: 160
                             height: 32
                             radius: 8
-                            color: winBL.btExpanded ? "#2e1065" : "#27272a"
+                            color: (winBL.stageMode === 2) ? "#2e1065" : "#27272a"
                             border.width: 1
                             border.color: (winBL.btState === "CONN") ? themeContext.geminiCyan : ((winBL.btState === "ON") ? themeContext.geminiPurple : "#3f3f46")
 
@@ -387,11 +702,11 @@ Variants {
                                 Text {
                                     text: (winBL.btState === "CONN") ? "🎧" : "ᛒ"
                                     font.pixelSize: 11
-                                    color: (winBL.btState === "CONN") ? themeContext.geminiCyan : "#a1a1aa"
+                                    color: (winBL.btState === "CONN") ? themeContext.geminiCyan : ((winBL.btState === "ON") ? themeContext.geminiPurple : "#a1a1aa")
                                 }
                                 Text {
                                     text: winBL.btName
-                                    color: (winBL.btState === "CONN") ? "#ffffff" : "#a1a1aa"
+                                    color: (winBL.btState === "CONN") ? "#ffffff" : ((winBL.btState === "ON") ? "#f3e8ff" : "#71717a")
                                     font.pixelSize: 10
                                     font.bold: true
                                     elide: Text.ElideRight
@@ -400,148 +715,23 @@ Variants {
                             }
                             MouseArea {
                                 anchors.fill: parent
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: (mouse) => {
-                                    if (mouse.button === Qt.RightButton) {
-                                        // 右鍵切換藍牙電源開關
-                                        cmdRunner.run("bluetoothctl show | grep -q 'Powered: yes' && bluetoothctl power off || bluetoothctl power on")
-                                        btStatusProc.running = false; btStatusProc.running = true
+                                onClicked: {
+                                    if (winBL.stageMode === 2) {
+                                        winBL.stageMode = 0
                                     } else {
-                                        // 左鍵展開配對設備抽屜
-                                        winBL.wifiExpanded = false
-                                        winBL.btExpanded = !winBL.btExpanded
-                                        if (winBL.btExpanded) {
-                                            scanBtProc.running = false
-                                            scanBtProc.running = true
-                                        }
+                                        winBL.stageMode = 2
+                                        scanBtProc.running = false
+                                        scanBtProc.running = true
+                                        btStatusProc.running = false
+                                        btStatusProc.running = true
                                     }
                                 }
                             }
                         }
                     }
 
-                    // 5. 原生抽屜：Wi-Fi 熱點雷達列表
-                    Rectangle {
-                        visible: winBL.wifiExpanded
-                        width: parent.width
-                        height: 115
-                        radius: 8
-                        color: "#18181b"
-                        border.width: 1
-                        border.color: themeContext.geminiGold
-                        clip: true
-
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            spacing: 4
-
-                            Repeater {
-                                model: wifiListModel
-                                delegate: Rectangle {
-                                    width: parent.width
-                                    height: 24
-                                    radius: 4
-                                    color: model.inUse ? "#1e1b4b" : (itemArea.containsMouse ? "#27272a" : "transparent")
-                                    border.width: model.inUse ? 1 : 0
-                                    border.color: themeContext.geminiGold
-
-                                    Row {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.left: parent.left
-                                        anchors.leftMargin: 8
-                                        spacing: 8
-                                        Text { text: "📶"; font.pixelSize: 9 }
-                                        Text {
-                                            text: model.ssid
-                                            color: model.inUse ? themeContext.geminiGold : "#ffffff"
-                                            font.pixelSize: 10
-                                            font.bold: model.inUse
-                                            elide: Text.ElideRight
-                                            width: 190
-                                        }
-                                        Text { text: model.security ? "🔒" : ""; font.pixelSize: 9 }
-                                        Text { text: model.signal + "%"; color: "#71717a"; font.pixelSize: 8; font.family: "JetBrains Mono" }
-                                    }
-
-                                    MouseArea {
-                                        id: itemArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            // 點擊熱點直接切換連接
-                                            cmdRunner.run("nmcli connection up '" + model.ssid + "' 2>/dev/null || nmcli dev wifi connect '" + model.ssid + "'")
-                                            winBL.wifiExpanded = false
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 6. 原生抽屜：藍牙配對設備列表
-                    Rectangle {
-                        visible: winBL.btExpanded
-                        width: parent.width
-                        height: 95
-                        radius: 8
-                        color: "#18181b"
-                        border.width: 1
-                        border.color: themeContext.geminiPurple
-                        clip: true
-
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            spacing: 4
-
-                            Repeater {
-                                model: btListModel
-                                delegate: Rectangle {
-                                    width: parent.width
-                                    height: 24
-                                    radius: 4
-                                    color: (winBL.btName === model.name) ? "#2e1065" : (btItemArea.containsMouse ? "#27272a" : "transparent")
-                                    border.width: (winBL.btName === model.name) ? 1 : 0
-                                    border.color: themeContext.geminiPurple
-
-                                    Row {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.left: parent.left
-                                        anchors.leftMargin: 8
-                                        spacing: 8
-                                        Text { text: "🎧"; font.pixelSize: 9 }
-                                        Text {
-                                            text: model.name
-                                            color: (winBL.btName === model.name) ? themeContext.geminiCyan : "#ffffff"
-                                            font.pixelSize: 10
-                                            font.bold: true
-                                            elide: Text.ElideRight
-                                            width: 220
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        id: btItemArea
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            // 點擊已配對設備切換連接/斷開
-                                            cmdRunner.run("bluetoothctl info " + model.mac + " | grep -q 'Connected: yes' && bluetoothctl disconnect " + model.mac + " || bluetoothctl connect " + model.mac)
-                                            winBL.btExpanded = false
-                                            btStatusProc.running = false
-                                            btStatusProc.running = true
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 7. 艙四：WORKSPACES 魔術區
+                    // 4. 🌟 WORKSPACES 魔術區 (絕對固定！永不跑路！)
                     Rectangle {
                         width: parent.width
                         height: 64
@@ -615,7 +805,7 @@ Variants {
                         }
                     }
 
-                    // 8. 艙五：⚡ 電源速控舵
+                    // 5. 🌟 電源速控舵 (絕對固定！永不跑路！)
                     Row {
                         spacing: 10
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -661,24 +851,79 @@ Variants {
                         }
                     }
 
-                    // 9. 底部焦點窗口 + ⌨ 輸入法無縫整合
+                    // ========================================================
+                    // 6. 🚀 最底行進化：動態程序圖標任務欄 (App Dock) + 輸入法
+                    // ========================================================
                     Row {
                         width: parent.width
                         spacing: 8
+                        anchors.horizontalCenter: parent.horizontalCenter
 
-                        Text {
-                            text: Hyprland.activeToplevel ? ("● " + Hyprland.activeToplevel.title) : "● 桌面就绪 (Desktop Idle)"
-                            color: "#71717a"
-                            font.pixelSize: 9
-                            elide: Text.ElideRight
-                            width: parent.width - 88
+                        // 橫向滾動微型任務欄
+                        Flickable {
+                            id: taskFlick
+                            width: parent.width - 80
+                            height: 24
+                            contentWidth: taskRow.width
+                            clip: true
                             anchors.verticalCenter: parent.verticalCenter
+                            boundsBehavior: Flickable.StopAtBounds
+
+                            Row {
+                                id: taskRow
+                                spacing: 6
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                Repeater {
+                                    model: taskbarModel
+                                    delegate: Rectangle {
+                                        readonly property bool isCurrent: Hyprland.activeToplevel && (Hyprland.activeToplevel.address === model.address)
+
+                                        width: 24
+                                        height: 24
+                                        radius: 6
+                                        color: isCurrent ? "#38bdf825" : (appArea.containsMouse ? "#27272a" : "transparent")
+                                        border.width: isCurrent ? 1 : 0
+                                        border.color: themeContext.geminiCyan
+
+                                        Behavior on color { ColorAnimation { duration: 120 } }
+
+                                        Image {
+                                            id: appIcon
+                                            anchors.centerIn: parent
+                                            width: 16
+                                            height: 16
+                                            source: Quickshell.iconPath(model.winClass, true) || Quickshell.iconPath(model.initialClass, true) || ""
+                                            visible: status === Image.Ready
+                                        }
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            visible: !appIcon.visible
+                                            text: model.winClass ? model.winClass.charAt(0).toUpperCase() : "●"
+                                            color: isCurrent ? themeContext.geminiCyan : "#a1a1aa"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
+
+                                        MouseArea {
+                                            id: appArea
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                Hyprland.dispatch("focuswindow address:" + model.address)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
-                        // 輸入法精巧微標籤 (點擊切換)
+                        // 輸入法精巧微標籤
                         Rectangle {
-                            width: 80
-                            height: 20
+                            width: 72
+                            height: 22
                             radius: 5
                             color: "#27272a"
                             border.width: 1
