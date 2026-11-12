@@ -37,7 +37,6 @@ ShellRoot {
         }
     }
 
-    // 打擊座標與鍵位配置
     property int shiftZx: 500
     property int shiftZy: 500
     property string shiftZBtn: "0xC0"
@@ -117,7 +116,6 @@ ShellRoot {
         }
     }
 
-    // 音量讀取進程 (支持 WirePlumber & PulseAudio)
     Process {
         id: volReader
         command: ["sh", "-c", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || pamixer --get-volume 2>/dev/null || echo 'Volume: 0.50'"]
@@ -135,7 +133,6 @@ ShellRoot {
         }
     }
 
-    // 音量寫入進程
     Process {
         id: volWriter
         function setVol(pct) {
@@ -150,31 +147,22 @@ ShellRoot {
         }
     }
 
+    // 倒計時讀取進程 (實時同步守護進程計算好的真實剩餘秒數)
     Process {
-        id: autoClickerRunner
-        function runScript(cmd) {
-            command = ["sh", "-c", cmd]
-            running = false; running = true
+        id: countdownReader
+        command: ["sh", "-c", "cat /tmp/sleep_countdown 2>/dev/null || echo '900'"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var v = parseInt(text.trim())
+                if (!isNaN(v)) root.sleepCountdown = v
+            }
         }
     }
 
-    Process {
-        id: autoQRunner
-        function runScript(cmd) {
-            command = ["sh", "-c", cmd]
-            running = false; running = true
-        }
-    }
+    Process { id: autoClickerRunner; function runScript(cmd) { command = ["sh", "-c", cmd]; running = false; running = true } }
+    Process { id: autoQRunner; function runScript(cmd) { command = ["sh", "-c", cmd]; running = false; running = true } }
+    Process { id: strikeRunner; function runScript(cmd) { command = ["sh", "-c", cmd]; running = false; running = true } }
 
-    Process {
-        id: strikeRunner
-        function runScript(cmd) {
-            command = ["sh", "-c", cmd]
-            running = false; running = true
-        }
-    }
-
-    // 讀取持久化配置（座標、鍵位、開關、咖啡因）
     Process {
         id: loadCoordsProc
         command: ["sh", "-c", "cat ~/.config/quickshell/coords.json 2>/dev/null || echo '{}'"]
@@ -198,11 +186,8 @@ ShellRoot {
         }
     }
 
-    Process {
-        id: saveCoordsProc
-    }
+    Process { id: saveCoordsProc }
 
-    // 寫入持久化配置
     function saveCoords() {
         var data = {
             zx: root.shiftZx, zy: root.shiftZy, zbtn: root.shiftZBtn,
@@ -220,7 +205,6 @@ ShellRoot {
     Component.onCompleted: {
         loadCoordsProc.running = true
         volReader.running = true
-        // 確保睡眠守護進程在後台執行
         strikeRunner.runScript("pgrep -f sleep_guard.sh >/dev/null || nohup ~/.config/quickshell/sleep_guard.sh >/dev/null 2>&1 &")
     }
 
@@ -305,7 +289,7 @@ ShellRoot {
         stdout: StdioCollector {
             onStreamFinished: {
                 var s = text.trim()
-                root.currentWifi = s.length > 0 ? s : "未连接"
+                root.currentWifi = s.length > 0 ? s : "未連接"
             }
         }
     }
@@ -324,7 +308,6 @@ ShellRoot {
     Timer {
         interval: 1000; running: true; repeat: true; triggeredOnStart: true
         onTriggered: {
-            if (!root.caffeineActive) { root.sleepCountdown = Math.max(0, root.sleepCountdown - 1); if (root.sleepCountdown === 0) { strikeRunner.runScript("systemctl suspend"); root.sleepCountdown = 900; } } else { root.sleepCountdown = 900; }
             var now = new Date()
             var h = now.getHours()
             var m = now.getMinutes()
@@ -346,6 +329,8 @@ ShellRoot {
                 soundPlayer.play(theme.soundAlarm)
             }
 
+            // 定期刷新心跳 (同步睡眠倒計時、音量與 Wi-Fi)
+            countdownReader.running = false; countdownReader.running = true
             if (s % 2 === 0) {
                 wifiProcess.running = false; wifiProcess.running = true
                 imeProcess.running = false; imeProcess.running = true

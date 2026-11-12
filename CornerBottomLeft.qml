@@ -20,17 +20,15 @@ Variants {
         property bool isOpen: false
         property bool isLocked: false
 
-        // 中台視圖模式：0 = 默認(咖啡因+音量), 1 = Wi-Fi雷達, 2 = 藍牙中樞
         property int stageMode: 0
         property bool wifiScanning: false
         property bool btScanning: false
 
-        // 藍牙狀態
         property string btState: "ON"
         property string btName: "未連線"
         property bool btDiscoverable: false
+        property bool btPairable: false
 
-        // 安全連接藍牙設備函數 (杜絕行內拼接引發語法分號錯誤)
         function connectBt(mac) {
             var cmd = "bluetoothctl info " + mac + " | grep -q 'Connected: yes' && bluetoothctl disconnect " + mac + " || (bluetoothctl pair " + mac + " 2>/dev/null; bluetoothctl trust " + mac + " 2>/dev/null; bluetoothctl connect " + mac + ")"
             cmdRunner.run(cmd)
@@ -39,9 +37,8 @@ Variants {
             btStatusProc.running = true
         }
 
-        // 尺寸徹底鎖定在 360 x 425，絕對零閃爍、按鈕永不跑路
         implicitWidth: isOpen ? 360 : themeContext.cornerSize
-        implicitHeight: isOpen ? 425 : themeContext.cornerSize
+        implicitHeight: isOpen ? 435 : themeContext.cornerSize
 
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
@@ -55,7 +52,6 @@ Variants {
             }
         }
 
-        // 🌟 任務欄數據源：實時獲取當前所有已開啟程序
         ListModel { id: taskbarModel }
 
         Process {
@@ -73,7 +69,8 @@ Variants {
                                 address: c.address,
                                 winClass: c.class,
                                 title: c.title || "",
-                                initialClass: c.initialClass || c.class
+                                initialClass: c.initialClass || c.class,
+                                wsId: c.workspace ? c.workspace.id : 1
                             })
                         }
                     } catch(e) {}
@@ -81,20 +78,12 @@ Variants {
             }
         }
 
-        // 監聽 Hyprland 焦點或工作區變動，實時更新任務欄圖標
         Connections {
             target: Hyprland
-            function onActiveToplevelChanged() {
-                taskbarProc.running = false
-                taskbarProc.running = true
-            }
-            function onFocusedWorkspaceChanged() {
-                taskbarProc.running = false
-                taskbarProc.running = true
-            }
+            function onActiveToplevelChanged() { taskbarProc.running = false; taskbarProc.running = true }
+            function onFocusedWorkspaceChanged() { taskbarProc.running = false; taskbarProc.running = true }
         }
 
-        // 熱點掃描模型
         ListModel { id: wifiListModel }
 
         Process {
@@ -121,7 +110,6 @@ Variants {
             }
         }
 
-        // 藍牙已知設備模型
         ListModel { id: btListModel }
 
         Process {
@@ -174,17 +162,20 @@ Variants {
                 "sh", "-c",
                 "PWR=$(bluetoothctl show 2>/dev/null | grep -m1 'Powered:' | awk '{print $2}'); " +
                 "DISC=$(bluetoothctl show 2>/dev/null | grep -m1 'Discoverable:' | awk '{print $2}'); " +
+                "PAIR=$(bluetoothctl show 2>/dev/null | grep -m1 'Pairable:' | awk '{print $2}'); " +
                 "DEV=$(bluetoothctl devices Connected 2>/dev/null | head -n1 | cut -d ' ' -f 3-); " +
-                "echo \"$PWR|$DISC|$DEV\""
+                "echo \"$PWR|$DISC|$PAIR|$DEV\""
             ]
             stdout: StdioCollector {
                 onStreamFinished: {
                     var parts = text.trim().split("|")
-                    if (parts.length >= 2) {
+                    if (parts.length >= 3) {
                         var pwr = parts[0]
                         var disc = parts[1]
-                        var dev = parts[2] || ""
+                        var pair = parts[2]
+                        var dev = parts[3] || ""
                         winBL.btDiscoverable = (disc === "yes")
+                        winBL.btPairable = (pair === "yes")
 
                         if (pwr !== "yes") {
                             winBL.btState = "OFF"
@@ -232,9 +223,6 @@ Variants {
                 taskbarProc.running = false
                 taskbarProc.running = true
 
-                if (rootContext && !rootContext.caffeineActive) {
-                    rootContext.sleepCountdown = 900
-                }
                 if (!winBL.isOpen) {
                     winBL.isOpen = true
                     winBL.isLocked = true
@@ -265,7 +253,7 @@ Variants {
                 Column {
                     anchors.fill: parent
                     anchors.margins: 14
-                    spacing: 10
+                    spacing: 9
 
                     // 1. 表頭時鐘
                     Row {
@@ -286,13 +274,13 @@ Variants {
                         }
                     }
 
-                    // 2. 🌟 固定戰術中台 (固定高度 86px，向上擴展，絕對防抖)
+                    // 2. 🌟 固定戰術中台 (86px)
                     Item {
                         width: parent.width
                         height: 86
                         clip: true
 
-                        // 態 0：默認態 (☕ 咖啡因雙模膠囊 + 🔊 音量滑軌)
+                        // 態 0：默認 (咖啡因 + 音量)
                         Column {
                             anchors.fill: parent
                             spacing: 8
@@ -366,7 +354,6 @@ Variants {
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: {
                                         rootContext.caffeineActive = !rootContext.caffeineActive
-                                        rootContext.sleepCountdown = 900
                                         rootContext.saveCoords()
                                     }
                                 }
@@ -435,7 +422,7 @@ Variants {
                             }
                         }
 
-                        // 態 1：Wi-Fi 戰術雷達視圖
+                        // 態 1：Wi-Fi 視圖
                         Rectangle {
                             anchors.fill: parent
                             radius: 8
@@ -455,21 +442,18 @@ Variants {
                             Item {
                                 anchors.fill: parent
                                 visible: !winBL.wifiScanning && wifiListModel.count === 0
-
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 8
                                     Text { text: "📡"; font.pixelSize: 12 }
                                     Text { text: "未發現可用熱點 (點擊重新探測)"; color: "#71717a"; font.pixelSize: 10 }
                                 }
-
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: { winBL.wifiScanning = true; scanWifiProc.running = true }
                                 }
                             }
-
 
                             Column {
                                 anchors.fill: parent
@@ -518,7 +502,7 @@ Variants {
                             }
                         }
 
-                        // 態 2：藍牙全功能中樞視圖
+                        // 態 2：藍牙中樞 (修復 Row 警告 + 授權代理防呆)
                         Rectangle {
                             anchors.fill: parent
                             radius: 8
@@ -532,46 +516,77 @@ Variants {
                                 anchors.margins: 6
                                 spacing: 4
 
-                                Row {
-                                    width: parent.width - 12
-                                    anchors.horizontalCenter: parent.horizontalCenter
+                                // 頂部開關容器 (使用 Item 避免 Row 內部錨點違規警告)
+                                Item {
+                                    width: parent.width
+                                    height: 16
 
                                     Row {
-                                        spacing: 4
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        Text { text: (winBL.btState !== "OFF") ? "⚡" : "💤"; font.pixelSize: 9 }
-                                        Text { text: (winBL.btState !== "OFF") ? "射頻開" : "射頻關"; color: (winBL.btState !== "OFF") ? themeContext.geminiPurple : "#71717a"; font.pixelSize: 9; font.bold: true }
-                                        Rectangle {
-                                            width: 26; height: 14; radius: 7; color: (winBL.btState !== "OFF") ? themeContext.geminiPurple : "#3f3f46"
-                                            Rectangle { width: 10; height: 10; radius: 5; color: "#ffffff"; anchors.verticalCenter: parent.verticalCenter; x: (winBL.btState !== "OFF") ? (parent.width - width - 2) : 2; Behavior on x { NumberAnimation { duration: 150 } } }
-                                            MouseArea {
-                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    if (winBL.btState !== "OFF") { cmdRunner.run("bluetoothctl power off"); winBL.btState = "OFF"; winBL.btName = "已關閉"; winBL.btDiscoverable = false }
-                                                    else { cmdRunner.run("bluetoothctl power on"); winBL.btState = "ON"; winBL.btName = "未連線" }
-                                                    btStatusProc.running = false; btStatusProc.running = true
+                                        anchors.centerIn: parent
+                                        spacing: 12
+
+                                        // 供電開關
+                                        Row {
+                                            spacing: 4
+                                            Text { text: (winBL.btState !== "OFF") ? "⚡" : "💤"; font.pixelSize: 9 }
+                                            Text { text: (winBL.btState !== "OFF") ? "射頻開" : "射頻關"; color: (winBL.btState !== "OFF") ? themeContext.geminiPurple : "#71717a"; font.pixelSize: 9; font.bold: true }
+                                            Rectangle {
+                                                width: 24; height: 13; radius: 6; color: (winBL.btState !== "OFF") ? themeContext.geminiPurple : "#3f3f46"
+                                                Rectangle { width: 9; height: 9; radius: 4; color: "#ffffff"; anchors.verticalCenter: parent.verticalCenter; x: (winBL.btState !== "OFF") ? (parent.width - width - 2) : 2; Behavior on x { NumberAnimation { duration: 150 } } }
+                                                MouseArea {
+                                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        if (winBL.btState !== "OFF") {
+                                                            winBL.btState = "OFF"; winBL.btName = "已關閉"; winBL.btDiscoverable = false; winBL.btPairable = false
+                                                            cmdRunner.run("bluetoothctl power off")
+                                                        } else {
+                                                            winBL.btState = "ON"; winBL.btName = "未連線"
+                                                            cmdRunner.run("bluetoothctl power on")
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
-                                    }
 
-                                    Item { width: 30; height: 1 }
+                                        // 廣播可見開關
+                                        Row {
+                                            spacing: 4
+                                            visible: winBL.btState !== "OFF"
+                                            Text { text: winBL.btDiscoverable ? "📡" : "🙈"; font.pixelSize: 9 }
+                                            Text { text: winBL.btDiscoverable ? "廣播開" : "廣播隱"; color: winBL.btDiscoverable ? themeContext.geminiCyan : "#71717a"; font.pixelSize: 9; font.bold: true }
+                                            Rectangle {
+                                                width: 24; height: 13; radius: 6; color: winBL.btDiscoverable ? themeContext.geminiCyan : "#3f3f46"
+                                                Rectangle { width: 9; height: 9; radius: 4; color: "#ffffff"; anchors.verticalCenter: parent.verticalCenter; x: winBL.btDiscoverable ? (parent.width - width - 2) : 2; Behavior on x { NumberAnimation { duration: 150 } } }
+                                                MouseArea {
+                                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        winBL.btDiscoverable = !winBL.btDiscoverable
+                                                        cmdRunner.run(winBL.btDiscoverable ? "bluetoothctl discoverable on" : "bluetoothctl discoverable off")
+                                                    }
+                                                }
+                                            }
+                                        }
 
-                                    Row {
-                                        spacing: 4
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        visible: winBL.btState !== "OFF"
-                                        Text { text: winBL.btDiscoverable ? "📡" : "🙈"; font.pixelSize: 9 }
-                                        Text { text: winBL.btDiscoverable ? "廣播開" : "廣播隱"; color: winBL.btDiscoverable ? themeContext.geminiCyan : "#71717a"; font.pixelSize: 9; font.bold: true }
-                                        Rectangle {
-                                            width: 26; height: 14; radius: 7; color: winBL.btDiscoverable ? themeContext.geminiCyan : "#3f3f46"
-                                            Rectangle { width: 10; height: 10; radius: 5; color: "#ffffff"; anchors.verticalCenter: parent.verticalCenter; x: winBL.btDiscoverable ? (parent.width - width - 2) : 2; Behavior on x { NumberAnimation { duration: 150 } } }
-                                            MouseArea {
-                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    if (winBL.btDiscoverable) { cmdRunner.run("bluetoothctl discoverable off"); winBL.btDiscoverable = false }
-                                                    else { cmdRunner.run("bluetoothctl discoverable on"); winBL.btDiscoverable = true }
-                                                    btStatusProc.running = false; btStatusProc.running = true
+                                        // 配對授權開關
+                                        Row {
+                                            spacing: 4
+                                            visible: winBL.btState !== "OFF"
+                                            Text { text: winBL.btPairable ? "🤝" : "🔒"; font.pixelSize: 9 }
+                                            Text { text: winBL.btPairable ? "配對允" : "配對拒"; color: winBL.btPairable ? themeContext.geminiGold : "#71717a"; font.pixelSize: 9; font.bold: true }
+                                            Rectangle {
+                                                width: 24; height: 13; radius: 6; color: winBL.btPairable ? themeContext.geminiGold : "#3f3f46"
+                                                Rectangle { width: 9; height: 9; radius: 4; color: "#ffffff"; anchors.verticalCenter: parent.verticalCenter; x: winBL.btPairable ? (parent.width - width - 2) : 2; Behavior on x { NumberAnimation { duration: 150 } } }
+                                                MouseArea {
+                                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        winBL.btPairable = !winBL.btPairable
+                                                        if (winBL.btPairable) {
+                                                            winBL.btDiscoverable = true
+                                                            cmdRunner.run("bluetoothctl power on && bluetoothctl pairable on && bluetoothctl discoverable on && (pgrep -f 'bluetoothctl.*agent' || nohup bluetoothctl --agent NoInputNoOutput >/dev/null 2>&1 &)")
+                                                        } else {
+                                                            cmdRunner.run("bluetoothctl pairable off; pkill -f 'bluetoothctl.*agent'")
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -600,7 +615,12 @@ Variants {
                                         Rectangle {
                                             width: 110; height: 20; radius: 10; color: "#27272a"; border.width: 1; border.color: themeContext.geminiPurple
                                             anchors.horizontalCenter: parent.horizontalCenter
-                                            Row { anchors.centerIn: parent; spacing: 4; Text { text: winBL.btScanning ? "⏳" : "🔍"; font.pixelSize: 8 } Text { text: winBL.btScanning ? "探測中..." : "掃描新設備"; color: "#f3e8ff"; font.pixelSize: 8; font.bold: true } }
+                                            Row {
+                                                anchors.centerIn: parent
+                                                spacing: 4
+                                                Text { text: winBL.btScanning ? "⏳" : "🔍"; font.pixelSize: 8 }
+                                                Text { text: winBL.btScanning ? "探測中..." : "掃描新設備"; color: "#f3e8ff"; font.pixelSize: 8; font.bold: true }
+                                            }
                                             MouseArea {
                                                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                                 onClicked: { winBL.btScanning = true; startScanBtProc.running = false; startScanBtProc.running = true }
@@ -646,7 +666,7 @@ Variants {
                         }
                     }
 
-                    // 3. 🌟 通訊雙子星 (絕對固定！永不跑路！)
+                    // 3. 🌟 通訊雙子星 (絕對固定)
                     Row {
                         spacing: 10
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -731,7 +751,7 @@ Variants {
                         }
                     }
 
-                    // 4. 🌟 WORKSPACES 魔術區 (絕對固定！永不跑路！)
+                    // 4. 🌟 WORKSPACES 魔術區 (絕對固定)
                     Rectangle {
                         width: parent.width
                         height: 64
@@ -805,61 +825,44 @@ Variants {
                         }
                     }
 
-                    // 5. 🌟 電源速控舵 (絕對固定！永不跑路！)
+                    // 5. 🌟 五聯電源舵：睡眠 | 鎖屏 | 登出 | 重啟 | 關機
                     Row {
-                        spacing: 10
+                        spacing: 6
                         anchors.horizontalCenter: parent.horizontalCenter
 
                         Rectangle {
-                            width: 160
-                            height: 28
-                            radius: 6
-                            color: "#27272a"
-                            border.width: 1
-                            border.color: "#3f3f46"
-                            Row {
-                                anchors.centerIn: parent
-                                spacing: 6
-                                Text { text: "💤"; font.pixelSize: 11 }
-                                Text { text: "立即睡眠 (Suspend)"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true }
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: cmdRunner.run("systemctl suspend")
-                            }
+                            width: 62; height: 26; radius: 6; color: "#27272a"; border.width: 1; border.color: "#3f3f46"
+                            Text { anchors.centerIn: parent; text: "💤 睡眠"; color: "#e4e4e7"; font.pixelSize: 9; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: cmdRunner.run("systemctl suspend") }
                         }
-
                         Rectangle {
-                            width: 160
-                            height: 28
-                            radius: 6
-                            color: "#27272a"
-                            border.width: 1
-                            border.color: "#3f3f46"
-                            Row {
-                                anchors.centerIn: parent
-                                spacing: 6
-                                Text { text: "🔒"; font.pixelSize: 11 }
-                                Text { text: "鎖定屏幕 (Lock)"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true }
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: cmdRunner.run("hyprlock || swaylock || loginctl lock-session")
-                            }
+                            width: 62; height: 26; radius: 6; color: "#27272a"; border.width: 1; border.color: "#3f3f46"
+                            Text { anchors.centerIn: parent; text: "🔒 鎖屏"; color: "#e4e4e7"; font.pixelSize: 9; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: cmdRunner.run("hyprlock || swaylock || loginctl lock-session") }
+                        }
+                        Rectangle {
+                            width: 62; height: 26; radius: 6; color: "#27272a"; border.width: 1; border.color: "#3f3f46"
+                            Text { anchors.centerIn: parent; text: "🚪 登出"; color: "#f87171"; font.pixelSize: 9; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: cmdRunner.run("hyprctl dispatch exit") }
+                        }
+                        Rectangle {
+                            width: 62; height: 26; radius: 6; color: "#27272a"; border.width: 1; border.color: "#3f3f46"
+                            Text { anchors.centerIn: parent; text: "🔄 重啟"; color: themeContext.geminiGold; font.pixelSize: 9; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: cmdRunner.run("systemctl reboot") }
+                        }
+                        Rectangle {
+                            width: 62; height: 26; radius: 6; color: "#3f1d38"; border.width: 1; border.color: themeContext.geminiRose
+                            Text { anchors.centerIn: parent; text: "⏻ 關機"; color: "#f43f5e"; font.pixelSize: 9; font.bold: true }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: cmdRunner.run("systemctl poweroff") }
                         }
                     }
 
-                    // ========================================================
-                    // 6. 🚀 最底行進化：動態程序圖標任務欄 (App Dock) + 輸入法
-                    // ========================================================
+                    // 6. 🌟 任務欄 Dock (點擊跨工作區秒切窗口 + 瞬移光標跳出鼠標搶奪)
                     Row {
                         width: parent.width
                         spacing: 8
                         anchors.horizontalCenter: parent.horizontalCenter
 
-                        // 橫向滾動微型任務欄
                         Flickable {
                             id: taskFlick
                             width: parent.width - 80
@@ -912,7 +915,10 @@ Variants {
                                             hoverEnabled: true
                                             cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                Hyprland.dispatch("focuswindow address:" + model.address)
+                                                // 🌟 關鍵三連擊：切工作區 + 聚焦窗口 + 鼠標強制移入窗口中心打破角落搶奪！
+                                                cmdRunner.run("hyprctl dispatch workspace " + model.wsId + " && hyprctl dispatch focuswindow address:" + model.address)
+                                                winBL.isOpen = false
+                                                winBL.isLocked = false
                                             }
                                         }
                                     }
@@ -920,7 +926,6 @@ Variants {
                             }
                         }
 
-                        // 輸入法精巧微標籤
                         Rectangle {
                             width: 72
                             height: 22
