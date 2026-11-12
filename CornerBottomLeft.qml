@@ -292,7 +292,7 @@ Variants {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     // 自動探測當前可用的終端，以 Hyprland 浮動居中窗口彈出熱點選擇器
-                                    cmdRunner.run("TERM_BIN=$(command -v kitty || command -v alacritty || command -v foot || command -v wezterm || echo 'xterm'); hyprctl dispatch exec \"[float; size 600 500; center] $TERM_BIN -e nmtui-connect\" 2>/dev/null || nm-connection-editor 2>/dev/null || nmtui")
+                                    cmdRunner.run('hyprctl dispatch exec "[float; size 650 500; center] kitty -e nmtui-connect"')
                                 }
                             }
                         }

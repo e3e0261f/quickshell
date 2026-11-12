@@ -301,7 +301,7 @@ ShellRoot {
 
     Process {
         id: wifiProcess
-        command: ["sh", "-c", "nmcli -t -f active,ssid dev wifi | grep '^yes' | cut -d: -f2 2>/dev/null || echo '未连接'"]
+        command: ["sh", "-c", "nmcli -t -f TYPE,CONNECTION dev | grep '^wifi:' | cut -d: -f2 | grep -v '^--$' | head -n1 || echo '未連接'"]
         stdout: StdioCollector {
             onStreamFinished: {
                 var s = text.trim()
