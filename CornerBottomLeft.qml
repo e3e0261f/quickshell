@@ -582,9 +582,9 @@ Variants {
                                                         winBL.btPairable = !winBL.btPairable
                                                         if (winBL.btPairable) {
                                                             winBL.btDiscoverable = true
-                                                            cmdRunner.run("bluetoothctl power on && bluetoothctl pairable on && bluetoothctl discoverable on && (pgrep -f 'bluetoothctl.*agent' || nohup bluetoothctl --agent NoInputNoOutput >/dev/null 2>&1 &)")
+                                                            cmdRunner.run("pgrep -f bt_agent.sh >/dev/null || nohup ~/.config/quickshell/bt_agent.sh >/dev/null 2>&1 &")
                                                         } else {
-                                                            cmdRunner.run("bluetoothctl pairable off; pkill -f 'bluetoothctl.*agent'")
+                                                            cmdRunner.run("pkill -f bt_agent.sh; rm -f /tmp/bt_ctl_fifo; bluetoothctl discoverable off; bluetoothctl pairable off")
                                                         }
                                                     }
                                                 }
