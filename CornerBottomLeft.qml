@@ -35,7 +35,6 @@ Variants {
         property string pairReqPasskey: ""
 
         function openPanel() {
-            timerBL.stop();
             btStatusProc.running = false;
             btStatusProc.running = true;
             pairReqReader.running = false;
@@ -43,8 +42,6 @@ Variants {
 
             if (!isOpen) {
                 isOpen = true;
-                isLocked = true;
-                lockTimerBL.restart();
             }
         }
 
@@ -90,7 +87,9 @@ Variants {
             }
         }
 
-        ListModel { id: wifiListModel }
+        ListModel {
+            id: wifiListModel
+        }
 
         Process {
             id: scanWifiProc
@@ -100,7 +99,8 @@ Variants {
                     wifiListModel.clear();
                     var lines = text.trim().split("\n");
                     for (var i = 0; i < lines.length; i++) {
-                        if (!lines[i]) continue;
+                        if (!lines[i])
+                            continue;
                         var parts = lines[i].split(":");
                         if (parts.length >= 3) {
                             wifiListModel.append({
@@ -116,7 +116,9 @@ Variants {
             }
         }
 
-        ListModel { id: btListModel }
+        ListModel {
+            id: btListModel
+        }
 
         Process {
             id: scanBtProc
@@ -126,7 +128,8 @@ Variants {
                     btListModel.clear();
                     var lines = text.trim().split("\n");
                     for (var i = 0; i < lines.length; i++) {
-                        if (!lines[i]) continue;
+                        if (!lines[i])
+                            continue;
                         var p = lines[i].split(" ");
                         if (p.length >= 3 && p[0] === "Device") {
                             btListModel.append({
@@ -148,7 +151,8 @@ Variants {
                     btListModel.clear();
                     var lines = text.trim().split("\n");
                     for (var i = 0; i < lines.length; i++) {
-                        if (!lines[i]) continue;
+                        if (!lines[i])
+                            continue;
                         var p = lines[i].split(" ");
                         if (p.length >= 3 && p[0] === "Device") {
                             btListModel.append({
@@ -191,18 +195,6 @@ Variants {
             }
         }
 
-
-        Timer {
-            id: lockTimerBL
-            interval: 450
-            onTriggered: {
-                screenScope.isLocked = false;
-                if (!winBL.isMouseInsideUI) {
-                    timerBL.restart();
-                }
-            }
-        }
-
         Timer {
             id: timerBL
             interval: 300
@@ -239,7 +231,7 @@ Variants {
         // ============================================================
         // 窗口 2：獨立主彈窗（直接通過 visible 控制開關，徹底告別醜陋縮放特效）
         // ============================================================
-        PanelWindow {
+                PanelWindow {
             id: winBL
             screen: screenScope.modelData
             visible: screenScope.isOpen
@@ -253,47 +245,21 @@ Variants {
 
             exclusionMode: ExclusionMode.Ignore
             WlrLayershell.layer: WlrLayer.Top
-            // 設置一個獨立的 namespace，方便在 Hyprland 裡彻底禁用它的系統級動畫
             WlrLayershell.namespace: "quickshell-corner-popup"
             color: "transparent"
 
             readonly property real cardHeight: mainCol.implicitHeight + 28
 
-            readonly property bool isMouseInsideUI: {
-                if (!screenScope.isOpen)
-                    return false;
-                var mx = globalTracker.mouseX;
-                var my = globalTracker.mouseY;
-                var inCard = (mx >= 0 && mx <= mainCard.width && my >= (height - mainCard.height) && my <= height);
-                var inMenu = customTrayMenu.visible && (mx >= customTrayMenu.x && mx <= (customTrayMenu.x + customTrayMenu.width) && my >= customTrayMenu.y && my <= (customTrayMenu.y + customTrayMenu.height));
-                return inCard || inMenu;
-            }
-
-            onIsMouseInsideUIChanged: {
-                if (isMouseInsideUI) {
-                    timerBL.stop();
-                } else if (screenScope.isOpen && !screenScope.isLocked) {
-                    timerBL.restart();
-                }
-            }
-            // 全屏透明背景幕布：點擊屏幕任何外部位置立刻秒關
+            // 🌟【规则 A】窗口【外部】点击（屏幕空白处/编辑器）：无论菜单开没开，直接关闭菜单 + 关闭整个窗口
             MouseArea {
                 id: globalTracker
                 anchors.fill: parent
-                hoverEnabled: true
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 z: 1
                 onClicked: screenScope.closeAll()
             }
-            // 菜單打開時的卡片遮罩：點擊卡片空白處也直接關閉
-            MouseArea {
-                visible: customTrayMenu.visible
-                anchors.fill: mainCard
-                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                z: 998
-                onClicked: screenScope.closeAll()
-            }
-            // 主面板視覺卡片（僅保留極輕柔的透明度淡入，無任何尺寸縮放）
+
+            // 4. 主面板視覺卡片（固定在左下角，寬度 360px）
             Rectangle {
                 id: mainCard
                 anchors.bottom: parent.bottom
@@ -305,7 +271,7 @@ Variants {
                 radius: 14
                 border.width: 1
                 border.color: "#3f3f46"
-                // 溫柔絲滑的淡入過渡（僅 120ms 透明度變化）
+
                 opacity: screenScope.isOpen ? 1.0 : 0.0
                 Behavior on opacity {
                     NumberAnimation {
@@ -313,9 +279,17 @@ Variants {
                         easing.type: Easing.OutQuad
                     }
                 }
+
+                // 僅攔截卡片區域的點擊防止穿透到後方的 globalTracker（點卡片內部空白不會誤關窗口，點卡片外部才會秒關）
                 MouseArea {
                     anchors.fill: parent
-                    acceptedButtons: Qt.NoButton
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onClicked: {
+                        // 點擊卡片空白處時，如果右鍵菜單開著，僅收起菜單，不關主窗口
+                        if (customTrayMenu.visible) {
+                            customTrayMenu.visible = false;
+                        }
+                    }
                     onWheel: wheel => {
                         if (wheel.angleDelta.y > 0)
                             Hyprland.dispatch("workspace e+1");
@@ -323,6 +297,7 @@ Variants {
                             Hyprland.dispatch("workspace e-1");
                     }
                 }
+
                 Column {
                     id: mainCol
                     anchors.top: parent.top
@@ -330,6 +305,7 @@ Variants {
                     anchors.right: parent.right
                     anchors.margins: 14
                     spacing: 10
+
                     // 1. 表頭時鐘
                     Row {
                         spacing: 10
@@ -348,6 +324,7 @@ Variants {
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
+
                     // 藍牙設備請求授權卡片
                     Rectangle {
                         visible: screenScope.hasPairRequest
@@ -427,11 +404,13 @@ Variants {
                             }
                         }
                     }
+
                     // 2. 固定戰術中台 (84px)
                     Item {
                         width: parent.width
                         height: 84
                         clip: true
+
                         // 態 0：默認態 (咖啡因 + 音量)
                         Column {
                             anchors.fill: parent
@@ -1209,18 +1188,14 @@ Variants {
                             }
                         }
                     }
-                    // 6. 後台駐留托盤狀態欄 + 輸入法
+                    // 6. 🌟 後台駐留托盤狀態欄 + 輸入法（移除 Flickable 干擾，點擊 100% 直達圖標）
                     Row {
                         width: parent.width
                         spacing: 8
-                        Flickable {
-                            id: trayFlick
+                        Item {
                             width: parent.width - 80
                             height: 24
-                            contentWidth: trayRow.width
-                            clip: true
                             anchors.verticalCenter: parent.verticalCenter
-                            boundsBehavior: Flickable.StopAtBounds
                             Row {
                                 id: trayRow
                                 spacing: 6
@@ -1239,7 +1214,7 @@ Variants {
                                         width: 24
                                         height: 24
                                         radius: 6
-                                        color: trayItemArea.containsMouse ? "#27272a" : "transparent"
+                                        color: (customTrayMenu.visible && menuOpener.menu === modelData.menu) ? "#3f3f46" : (trayItemArea.containsMouse ? "#27272a" : "transparent")
                                         Image {
                                             anchors.centerIn: parent
                                             width: 16
@@ -1258,10 +1233,15 @@ Variants {
                                                     modelData.activate();
                                                 } else if (mouse.button === Qt.RightButton) {
                                                     if (modelData.hasMenu && modelData.menu) {
-                                                        menuOpener.menu = modelData.menu;
-                                                        customTrayMenu.visible = true;
+                                                        if (customTrayMenu.visible && menuOpener.menu === modelData.menu) {
+                                                            customTrayMenu.visible = false;
+                                                        } else {
+                                                            menuOpener.menu = modelData.menu;
+                                                            customTrayMenu.visible = true;
+                                                        }
                                                     } else {
-                                                        modelData.secondaryActivate();
+                                                        // 對於無原生菜單的圖標，僅收起當前打開的菜單，絕不誤關整個主窗口
+                                                        customTrayMenu.visible = false;
                                                     }
                                                 }
                                             }
