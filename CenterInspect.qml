@@ -21,6 +21,17 @@ Variants {
         property var themeContext: rootVariant.themeContext
         property var clockContext: rootVariant.clockContext
 
+        // 窗口全屏與自由縮放狀態
+        property bool cardLarge: false
+        property bool cardFullscreen: false
+        property int customCardWidth: 0
+        property int customCardHeight: 0
+        readonly property int expandedContentHeight: cardFullscreen
+            ? Math.max(392, height - 215)
+            : (customCardHeight > 0
+               ? Math.max(392, customCardHeight - 205)
+               : (cardLarge ? Math.max(392, Math.min(720, height - 80) - 205) : 0))
+
         anchors { top: true; bottom: true; left: true; right: true }
         exclusionMode: ExclusionMode.Ignore
         WlrLayershell.layer: WlrLayer.Overlay
@@ -137,20 +148,38 @@ Variants {
         Rectangle {
             id: commandCard
             property int activeTab: 0
+            property bool isResizing: false
 
             anchors.horizontalCenter: parent.horizontalCenter
-            y: parent.height * 0.28
-            width: (activeTab === 1) ? 580 : 530
+            y: centerWin.cardFullscreen
+               ? 16
+               : Math.max(16, Math.min(parent.height * 0.24, (parent.height - height) / 2))
 
-            // 🌟 呼吸高度：直接取當前沙盒上報的自然高度，彈簧動畫平滑過渡
+            width: centerWin.cardFullscreen
+                   ? (parent.width - 32)
+                   : (centerWin.customCardWidth > 0
+                      ? Math.max(520, Math.min(parent.width - 24, centerWin.customCardWidth))
+                      : (centerWin.cardLarge
+                         ? Math.min(1040, parent.width - 80)
+                         : ((activeTab === 1) ? 580 : (activeTab === 0 ? 560 : 530))))
+
             readonly property int activeContentHeight: tabSandbox.implicitHeight > 0 ? tabSandbox.implicitHeight : 60
-            height: headerSection.height + activeContentHeight + 45
+            readonly property int naturalHeight: headerSection.height + activeContentHeight + 45
 
-            Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
-            Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
+            height: centerWin.cardFullscreen
+                    ? (parent.height - 32)
+                    : (centerWin.customCardHeight > 0
+                       ? Math.max(360, Math.min(parent.height - 24, centerWin.customCardHeight))
+                       : (centerWin.cardLarge
+                          ? Math.min(720, parent.height - 80)
+                          : Math.min(parent.height - 32, naturalHeight)))
+
+            Behavior on width  { enabled: !commandCard.isResizing; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            Behavior on height { enabled: !commandCard.isResizing; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            Behavior on y      { enabled: !commandCard.isResizing; NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
             color: themeContext.popupBg
-            radius: 20
+            radius: centerWin.cardFullscreen ? 14 : 20
             border.width: 1
             border.color: (activeTab === 0) ? themeContext.geminiCyan :
                           (activeTab === 1) ? themeContext.geminiGold :
@@ -174,9 +203,9 @@ Variants {
             Column {
                 id: headerSection
                 anchors.top: parent.top
-                anchors.topMargin: 22
+                anchors.topMargin: centerWin.cardFullscreen ? 12 : 22
                 anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 16
+                spacing: centerWin.cardFullscreen ? 10 : 16
                 width: parent.width
 
                 Column {
@@ -191,7 +220,7 @@ Variants {
                     Text {
                         text: clockContext.fullTimeString
                         color: "#ffffff"
-                        font.family: "JetBrains Mono"; font.bold: true; font.pixelSize: 56
+                        font.family: "JetBrains Mono"; font.bold: true; font.pixelSize: centerWin.cardFullscreen ? 40 : 56
                         style: Text.Outline; styleColor: "#4038bdf8"
                         anchors.horizontalCenter: parent.horizontalCenter
                     }
@@ -252,9 +281,9 @@ Variants {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
+                anchors.bottomMargin: 14
                 clip: true
 
-                // 🛡️ 核心防護網：以 SafeLoader 動態裝載當前 Tab
                 SafeLoader {
                     id: tabSandbox
                     anchors.top: parent.top
@@ -276,6 +305,99 @@ Variants {
                     scriptRunner: scriptRunner
                     handleHistory: handleHistory
                     netTelemetryProc: netTelemetryProc
+                }
+            }
+
+            // 右上角：重置大小 & 全屏/還原按鈕
+            Row {
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: 12
+                anchors.rightMargin: 14
+                spacing: 6
+                z: 20
+
+                Rectangle {
+                    visible: !centerWin.cardFullscreen && (centerWin.customCardWidth > 0 || centerWin.customCardHeight > 0)
+                    width: 46; height: 22; radius: 11
+                    color: "#27272a"; border.width: 1; border.color: "#3f3f46"
+                    Text { anchors.centerIn: parent; text: "↺ 重置"; color: "#a1a1aa"; font.pixelSize: 9; font.bold: true }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            centerWin.customCardWidth = 0
+                            centerWin.customCardHeight = 0
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 54; height: 22; radius: 11
+                    color: centerWin.cardFullscreen ? themeContext.geminiCyan : "#27272a"
+                    border.width: 1; border.color: centerWin.cardFullscreen ? themeContext.geminiCyan : "#3f3f46"
+                    Text {
+                        anchors.centerIn: parent
+                        text: centerWin.cardFullscreen ? "⤡ 還原" : "⛶ 全屏"
+                        color: centerWin.cardFullscreen ? "#18181b" : "#e4e4e7"
+                        font.pixelSize: 9; font.bold: true
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: centerWin.cardFullscreen = !centerWin.cardFullscreen
+                    }
+                }
+            }
+
+            // 右下角：自由拖拽調整大小手柄（雙擊還原默認）
+            Item {
+                id: resizeGrip
+                width: 24; height: 24
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                z: 20
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "◢"
+                    color: resizeArea.pressed || resizeArea.containsMouse ? themeContext.geminiCyan : "#52525b"
+                    font.pixelSize: 11
+                }
+
+                MouseArea {
+                    id: resizeArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeFDiagCursor
+
+                    property real startMouseX: 0
+                    property real startMouseY: 0
+                    property real startW: 0
+                    property real startH: 0
+
+                    onPressed: function(mouse) {
+                        var p = mapToItem(centerWin, mouse.x, mouse.y)
+                        startMouseX = p.x
+                        startMouseY = p.y
+                        startW = commandCard.width
+                        startH = commandCard.height
+                        centerWin.cardFullscreen = false
+                        commandCard.isResizing = true
+                    }
+                    onPositionChanged: function(mouse) {
+                        if (!pressed) return
+                        var p = mapToItem(centerWin, mouse.x, mouse.y)
+                        centerWin.customCardWidth = Math.max(520, Math.min(centerWin.width - 24, Math.round(startW + (p.x - startMouseX) * 2)))
+                        centerWin.customCardHeight = Math.max(360, Math.min(centerWin.height - 24, Math.round(startH + (p.y - startMouseY))))
+                    }
+                    onReleased: commandCard.isResizing = false
+                    onCanceled: commandCard.isResizing = false
+                    onDoubleClicked: {
+                        centerWin.cardFullscreen = false
+                        centerWin.customCardWidth = 0
+                        centerWin.customCardHeight = 0
+                    }
                 }
             }
         }

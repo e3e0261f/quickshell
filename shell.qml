@@ -50,6 +50,79 @@ ShellRoot {
     property bool autoClickerEnabled: false
     property bool autoQActive: false
 
+    // 焦點窗口實時流量監控（常駐後台，手動開關控制）
+    property bool netmonEnabled: false
+    property bool netmonPin: false
+    property int netmonLevel: 2
+    property string netmonMode: "stopped"
+    property string netmonClass: "未啟動"
+    property int netmonPid: 0
+    property int netmonProcs: 0
+    property real netmonTxKbps: 0
+    property real netmonRxKbps: 0
+    property int netmonTxPps: 0
+    property int netmonRxPps: 0
+    property var netmonAlerts: []
+    property var netmonEndpoints: []
+    property var netmonPackets: []
+    property var netmonAnomalyLog: []
+
+    function syncNetmonCfg() {
+        var cmd = "printf '%s' " + root.netmonLevel + " > /tmp/netmon_level; " +
+                  (root.netmonPin ? "touch /tmp/netmon_pin" : "rm -f /tmp/netmon_pin")
+        netmonCfgProc.command = ["sh", "-c", cmd]
+        netmonCfgProc.running = false
+        netmonCfgProc.running = true
+    }
+
+    onNetmonEnabledChanged: {
+        if (netmonEnabled) {
+            syncNetmonCfg()
+        } else {
+            netmonMode = "stopped"
+            netmonAlerts = []
+            netmonEndpoints = []
+            netmonPackets = []
+            netmonAnomalyLog = []
+            netmonCfgProc.command = ["sh", "-c", "rm -f /tmp/netmon_pin"]
+            netmonCfgProc.running = false
+            netmonCfgProc.running = true
+        }
+    }
+    onNetmonLevelChanged: syncNetmonCfg()
+    onNetmonPinChanged: syncNetmonCfg()
+
+    Process { id: netmonCfgProc }
+
+    Process {
+        id: netmonProc
+        command: [Qt.resolvedUrl("focus-netmon").toString().replace("file://", "")]
+        running: root.netmonEnabled
+        stdout: SplitParser {
+            onRead: function(line) {
+                var s = line.trim()
+                if (!s) return
+                try {
+                    var d = JSON.parse(s)
+                    root.netmonMode = d.mode || "proc"
+                    if (d.window) {
+                        root.netmonClass = d.window.class || "unknown"
+                        root.netmonPid = d.window.pid || 0
+                        root.netmonProcs = d.window.proc_count || 0
+                    }
+                    root.netmonTxKbps = d.tx_kbps || 0
+                    root.netmonRxKbps = d.rx_kbps || 0
+                    root.netmonTxPps = d.tx_pps || 0
+                    root.netmonRxPps = d.rx_pps || 0
+                    root.netmonAlerts = d.alerts || []
+                    root.netmonEndpoints = d.endpoints || []
+                    root.netmonPackets = d.recent_packets || []
+                    root.netmonAnomalyLog = d.anomaly_log || []
+                } catch (e) {}
+            }
+        }
+    }
+
     onAutoClickerEnabledChanged: {
         var bin = Qt.resolvedUrl("albion-clicker").toString().replace("file://", "")
         if (autoClickerEnabled) {
@@ -197,7 +270,7 @@ ShellRoot {
     Component.onCompleted: {
         loadCoordsProc.running = true
         volReader.running = true
-        strikeRunner.runScript("rm -f /tmp/q_spam_enabled /tmp/clicker_enabled; pkill -x albion-qspam; pkill -x albion-clicker; pgrep -f sleep_guard.sh >/dev/null || nohup ~/.config/quickshell/sleep_guard.sh >/dev/null 2>&1 &")
+        strikeRunner.runScript("rm -f /tmp/q_spam_enabled /tmp/clicker_enabled /tmp/netmon_pin; pkill -x albion-qspam; pkill -x albion-clicker; pkill -x focus-netmon; pgrep -f sleep_guard.sh >/dev/null || nohup ~/.config/quickshell/sleep_guard.sh >/dev/null 2>&1 &")
     }
 
     GlobalShortcut {
