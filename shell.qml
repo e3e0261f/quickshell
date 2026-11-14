@@ -48,40 +48,29 @@ ShellRoot {
     property bool cursorReturnEnabled: true
     property string clickerButtonCode: "0xC0"
     property bool autoClickerEnabled: false
-    onAutoClickerEnabledChanged: if (!autoClickerEnabled) autoClickerActive = false
-    property bool autoClickerActive: false
     property bool autoQActive: false
 
-    onAutoClickerActiveChanged: {
-        if (autoClickerActive) {
-            autoClickerRunner.runScript("while true; do ydotool click " + root.clickerButtonCode + "; sleep 0.08; done")
+    onAutoClickerEnabledChanged: {
+        var bin = Qt.resolvedUrl("albion-clicker").toString().replace("file://", "")
+        if (autoClickerEnabled) {
+            autoClickerRunner.runScript("printf '%s' '" + root.clickerButtonCode + "' > /tmp/clicker_btn && touch /tmp/clicker_enabled && (pgrep -x albion-clicker >/dev/null || '" + bin + "' --hold)")
         } else {
-            autoClickerRunner.runScript("pkill -f 'ydotool click'")
+            autoClickerRunner.runScript("rm -f /tmp/clicker_enabled; pkill -x albion-clicker")
+        }
+    }
+
+    onClickerButtonCodeChanged: {
+        if (autoClickerEnabled) {
+            strikeRunner.runScript("printf '%s' '" + root.clickerButtonCode + "' > /tmp/clicker_btn")
         }
     }
 
     onAutoQActiveChanged: {
+        var bin = Qt.resolvedUrl("albion-qspam").toString().replace("file://", "")
         if (autoQActive) {
-            autoQRunner.runScript("stdbuf -oL libinput debug-events 2>/dev/null | grep --line-buffered 'KEY_Q.*pressed' | while read -r _; do ydotool key 16:1 16:0; done")
+            autoQRunner.runScript("touch /tmp/q_spam_enabled && (pgrep -x albion-qspam >/dev/null || '" + bin + "')")
         } else {
-            autoQRunner.runScript("pkill -f 'libinput debug-events'")
-        }
-    }
-
-    GlobalShortcut {
-        name: "press_q"
-        onPressed: {
-            soundPlayer.play("bell")
-            strikeRunner.runScript("ydotool click 0xC0")
-        }
-    }
-
-    GlobalShortcut {
-        name: "toggle_clicker"
-        onPressed: {
-            if (!root.autoClickerEnabled) return;
-            root.autoClickerActive = !root.autoClickerActive
-            soundPlayer.play("audio-volume-change")
+            autoQRunner.runScript("rm -f /tmp/q_spam_enabled; pkill -x albion-qspam")
         }
     }
 
@@ -208,7 +197,7 @@ ShellRoot {
     Component.onCompleted: {
         loadCoordsProc.running = true
         volReader.running = true
-        strikeRunner.runScript("pgrep -f sleep_guard.sh >/dev/null || nohup ~/.config/quickshell/sleep_guard.sh >/dev/null 2>&1 &")
+        strikeRunner.runScript("rm -f /tmp/q_spam_enabled /tmp/clicker_enabled; pkill -x albion-qspam; pkill -x albion-clicker; pgrep -f sleep_guard.sh >/dev/null || nohup ~/.config/quickshell/sleep_guard.sh >/dev/null 2>&1 &")
     }
 
     GlobalShortcut {

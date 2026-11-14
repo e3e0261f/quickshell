@@ -137,7 +137,7 @@ Column {
                     Column {
                         spacing: 2
                         Text {
-                            text: "鼠標連擊 (Alt+C)"
+                            text: "鼠標連擊 (左+右鍵)"
                             color: "#ffffff"
                             font.pixelSize: 11
                             font.bold: true
