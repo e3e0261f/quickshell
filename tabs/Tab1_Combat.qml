@@ -6,6 +6,13 @@ Column {
     property var themeContext
     property var scriptRunner
 
+    // 統一主題色安全讀取，避免 themeContext 為空時報 TypeError
+    readonly property color colGold:  (themeContext && themeContext.geminiGold  !== undefined) ? themeContext.geminiGold  : "#eab308"
+    readonly property color colCoral: (themeContext && themeContext.geminiCoral !== undefined) ? themeContext.geminiCoral : "#f97316"
+    readonly property color colBlue:  (themeContext && themeContext.geminiBlue  !== undefined) ? themeContext.geminiBlue  : "#38bdf8"
+    readonly property color colRose:  (themeContext && themeContext.geminiRose  !== undefined) ? themeContext.geminiRose  : "#fb7185"
+    readonly property color colCyan:  (themeContext && themeContext.geminiCyan  !== undefined) ? themeContext.geminiCyan  : "#22d3ee"
+
     width: parent ? parent.width : 580
     spacing: 12
 
@@ -53,6 +60,8 @@ Column {
             id: mouseArea
             anchors.fill: parent
             onPressed: {
+                // 先搶佔焦點，讓尚未確認的 TextInput 觸發 onEditingFinished 完成提交
+                stepBtn.forceActiveFocus()
                 stepBtn.stepped(stepBtn.direction * 1)
                 stepBtn.holdTicks = 0
                 initialDelayTimer.restart()
@@ -70,9 +79,37 @@ Column {
         }
     }
 
+    // 坐標輸入組件（自動恢復綁定，支援 Enter 確認與無效輸入回滾）
+    component CoordInput: TextInput {
+        id: coordInput
+        property int coordValue: 0
+        signal committed(int newValue)
+
+        text: String(coordValue)
+        color: "#ffffff"
+        font.family: "JetBrains Mono"
+        font.pixelSize: 11
+        width: 38
+        horizontalAlignment: Text.AlignHCenter
+        selectByMouse: true
+        validator: IntValidator { bottom: 0; top: 9999 }
+
+        Keys.onReturnPressed: focus = false
+        Keys.onEnterPressed: focus = false
+
+        onEditingFinished: {
+            var v = parseInt(text, 10)
+            if (!isNaN(v)) {
+                v = Math.max(0, Math.min(9999, v))
+                committed(v)
+            }
+            text = Qt.binding(function() { return String(coordInput.coordValue) })
+        }
+    }
+
     Text {
         text: "ALBION & COMBAT HUD (YDO-TOOL ENGINE)"
-        color: themeContext ? themeContext.geminiGold : "#eab308"
+        color: tab1Root.colGold
         font.pixelSize: 10
         font.bold: true
         anchors.horizontalCenter: parent.horizontalCenter
@@ -89,7 +126,7 @@ Column {
             radius: 10
             color: "#18181b"
             border.width: 1
-            border.color: rootContext && rootContext.autoClickerActive ? themeContext.geminiGold : "#27272a"
+            border.color: rootContext && rootContext.autoClickerEnabled ? tab1Root.colGold : "#27272a"
 
             Column {
                 anchors.centerIn: parent
@@ -115,21 +152,21 @@ Column {
                         width: 38
                         height: 22
                         radius: 11
-                        color: rootContext && rootContext.autoClickerActive ? themeContext.geminiGold : "#3f3f46"
+                        color: rootContext && rootContext.autoClickerEnabled ? tab1Root.colGold : "#3f3f46"
                         Rectangle {
                             width: 18
                             height: 18
                             radius: 9
                             color: "#ffffff"
                             anchors.verticalCenter: parent.verticalCenter
-                            x: rootContext && rootContext.autoClickerActive ? (parent.width - width - 2) : 2
+                            x: rootContext && rootContext.autoClickerEnabled ? (parent.width - width - 2) : 2
                             Behavior on x { NumberAnimation { duration: 150 } }
                         }
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (rootContext) rootContext.autoClickerActive = !rootContext.autoClickerActive
+                                if (rootContext) rootContext.autoClickerEnabled = !rootContext.autoClickerEnabled
                             }
                         }
                     }
@@ -143,7 +180,7 @@ Column {
                         width: 50
                         height: 18
                         radius: 9
-                        color: rootContext && (rootContext.clickerButtonCode === "0xC0") ? themeContext.geminiGold : "#27272a"
+                        color: rootContext && (rootContext.clickerButtonCode === "0xC0") ? tab1Root.colGold : "#27272a"
                         Text {
                             anchors.centerIn: parent
                             text: "左鍵"
@@ -167,7 +204,7 @@ Column {
                         width: 50
                         height: 18
                         radius: 9
-                        color: rootContext && (rootContext.clickerButtonCode === "0xC1") ? themeContext.geminiGold : "#27272a"
+                        color: rootContext && (rootContext.clickerButtonCode === "0xC1") ? tab1Root.colGold : "#27272a"
                         Text {
                             anchors.centerIn: parent
                             text: "右鍵"
@@ -191,7 +228,7 @@ Column {
                         width: 50
                         height: 18
                         radius: 9
-                        color: rootContext && (rootContext.clickerButtonCode === "0xC2") ? themeContext.geminiGold : "#27272a"
+                        color: rootContext && (rootContext.clickerButtonCode === "0xC2") ? tab1Root.colGold : "#27272a"
                         Text {
                             anchors.centerIn: parent
                             text: "中鍵"
@@ -220,7 +257,7 @@ Column {
             radius: 10
             color: "#18181b"
             border.width: 1
-            border.color: rootContext && rootContext.autoQActive ? themeContext.geminiCoral : "#27272a"
+            border.color: rootContext && rootContext.autoQActive ? tab1Root.colCoral : "#27272a"
 
             Row {
                 anchors.centerIn: parent
@@ -244,7 +281,7 @@ Column {
                     width: 38
                     height: 22
                     radius: 11
-                    color: rootContext && rootContext.autoQActive ? themeContext.geminiCoral : "#3f3f46"
+                    color: rootContext && rootContext.autoQActive ? tab1Root.colCoral : "#3f3f46"
                     Rectangle {
                         width: 18
                         height: 18
@@ -272,19 +309,19 @@ Column {
         }
     }
 
-    // 行 2：打擊坐標調整與三鍵自選
+    // 行 2：打擊坐標調整與三鍵自選（註：後端屬性仍沿用 shiftZ*/shiftX* 命名以保持相容）
     Row {
         spacing: 14
         anchors.horizontalCenter: parent.horizontalCenter
 
-        // Shift+Z 面板
+        // Alt+Z 面板
         Rectangle {
             width: 255
             height: 86
             radius: 10
             color: "#18181b"
             border.width: 1
-            border.color: themeContext ? themeContext.geminiBlue : "#38bdf8"
+            border.color: tab1Root.colBlue
 
             Column {
                 anchors.centerIn: parent
@@ -292,7 +329,7 @@ Column {
 
                 Text {
                     text: "精確打擊 (Alt+Z)"
-                    color: themeContext ? themeContext.geminiBlue : "#38bdf8"
+                    color: tab1Root.colBlue
                     font.pixelSize: 10
                     font.bold: true
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -312,25 +349,17 @@ Column {
                         symbol: "-"
                         direction: -1
                         onStepped: function(d) {
-                            if (rootContext) rootContext.shiftZx = Math.max(0, rootContext.shiftZx + d)
+                            if (rootContext) rootContext.shiftZx = Math.max(0, Math.min(9999, rootContext.shiftZx + d))
                         }
                         onFinished: function() {
                             if (rootContext) rootContext.saveCoords()
                         }
                     }
-                    TextInput {
-                        text: rootContext ? rootContext.shiftZx : 500
-                        color: "#ffffff"
-                        font.family: "JetBrains Mono"
-                        font.pixelSize: 11
-                        width: 38
-                        horizontalAlignment: Text.AlignHCenter
+                    CoordInput {
                         anchors.verticalCenter: parent.verticalCenter
-                        selectByMouse: true
-                        validator: IntValidator { bottom: 0; top: 9999 }
-                        onEditingFinished: {
-                            var v = parseInt(text)
-                            if (!isNaN(v) && rootContext) {
+                        coordValue: rootContext ? rootContext.shiftZx : 500
+                        onCommitted: function(v) {
+                            if (rootContext) {
                                 rootContext.shiftZx = v
                                 rootContext.saveCoords()
                             }
@@ -340,7 +369,7 @@ Column {
                         symbol: "+"
                         direction: 1
                         onStepped: function(d) {
-                            if (rootContext) rootContext.shiftZx += d
+                            if (rootContext) rootContext.shiftZx = Math.max(0, Math.min(9999, rootContext.shiftZx + d))
                         }
                         onFinished: function() {
                             if (rootContext) rootContext.saveCoords()
@@ -359,25 +388,17 @@ Column {
                         symbol: "-"
                         direction: -1
                         onStepped: function(d) {
-                            if (rootContext) rootContext.shiftZy = Math.max(0, rootContext.shiftZy + d)
+                            if (rootContext) rootContext.shiftZy = Math.max(0, Math.min(9999, rootContext.shiftZy + d))
                         }
                         onFinished: function() {
                             if (rootContext) rootContext.saveCoords()
                         }
                     }
-                    TextInput {
-                        text: rootContext ? rootContext.shiftZy : 500
-                        color: "#ffffff"
-                        font.family: "JetBrains Mono"
-                        font.pixelSize: 11
-                        width: 38
-                        horizontalAlignment: Text.AlignHCenter
+                    CoordInput {
                         anchors.verticalCenter: parent.verticalCenter
-                        selectByMouse: true
-                        validator: IntValidator { bottom: 0; top: 9999 }
-                        onEditingFinished: {
-                            var v = parseInt(text)
-                            if (!isNaN(v) && rootContext) {
+                        coordValue: rootContext ? rootContext.shiftZy : 500
+                        onCommitted: function(v) {
+                            if (rootContext) {
                                 rootContext.shiftZy = v
                                 rootContext.saveCoords()
                             }
@@ -387,7 +408,7 @@ Column {
                         symbol: "+"
                         direction: 1
                         onStepped: function(d) {
-                            if (rootContext) rootContext.shiftZy += d
+                            if (rootContext) rootContext.shiftZy = Math.max(0, Math.min(9999, rootContext.shiftZy + d))
                         }
                         onFinished: function() {
                             if (rootContext) rootContext.saveCoords()
@@ -403,7 +424,7 @@ Column {
                         width: 50
                         height: 18
                         radius: 9
-                        color: rootContext && (rootContext.shiftZBtn === "0xC0") ? themeContext.geminiBlue : "#27272a"
+                        color: rootContext && (rootContext.shiftZBtn === "0xC0") ? tab1Root.colBlue : "#27272a"
                         Text {
                             anchors.centerIn: parent
                             text: "左鍵"
@@ -427,7 +448,7 @@ Column {
                         width: 50
                         height: 18
                         radius: 9
-                        color: rootContext && (rootContext.shiftZBtn === "0xC1") ? themeContext.geminiBlue : "#27272a"
+                        color: rootContext && (rootContext.shiftZBtn === "0xC1") ? tab1Root.colBlue : "#27272a"
                         Text {
                             anchors.centerIn: parent
                             text: "右鍵"
@@ -451,7 +472,7 @@ Column {
                         width: 50
                         height: 18
                         radius: 9
-                        color: rootContext && (rootContext.shiftZBtn === "0xC2") ? themeContext.geminiBlue : "#27272a"
+                        color: rootContext && (rootContext.shiftZBtn === "0xC2") ? tab1Root.colBlue : "#27272a"
                         Text {
                             anchors.centerIn: parent
                             text: "中鍵"
@@ -474,14 +495,14 @@ Column {
             }
         }
 
-        // Shift+X 面板
+        // Alt+X 面板
         Rectangle {
             width: 255
             height: 86
             radius: 10
             color: "#18181b"
             border.width: 1
-            border.color: themeContext ? themeContext.geminiRose : "#fb7185"
+            border.color: tab1Root.colRose
 
             Column {
                 anchors.centerIn: parent
@@ -489,7 +510,7 @@ Column {
 
                 Text {
                     text: "精確打擊 (Alt+X)"
-                    color: themeContext ? themeContext.geminiRose : "#fb7185"
+                    color: tab1Root.colRose
                     font.pixelSize: 10
                     font.bold: true
                     anchors.horizontalCenter: parent.horizontalCenter
@@ -509,25 +530,17 @@ Column {
                         symbol: "-"
                         direction: -1
                         onStepped: function(d) {
-                            if (rootContext) rootContext.shiftXx = Math.max(0, rootContext.shiftXx + d)
+                            if (rootContext) rootContext.shiftXx = Math.max(0, Math.min(9999, rootContext.shiftXx + d))
                         }
                         onFinished: function() {
                             if (rootContext) rootContext.saveCoords()
                         }
                     }
-                    TextInput {
-                        text: rootContext ? rootContext.shiftXx : 800
-                        color: "#ffffff"
-                        font.family: "JetBrains Mono"
-                        font.pixelSize: 11
-                        width: 38
-                        horizontalAlignment: Text.AlignHCenter
+                    CoordInput {
                         anchors.verticalCenter: parent.verticalCenter
-                        selectByMouse: true
-                        validator: IntValidator { bottom: 0; top: 9999 }
-                        onEditingFinished: {
-                            var v = parseInt(text)
-                            if (!isNaN(v) && rootContext) {
+                        coordValue: rootContext ? rootContext.shiftXx : 800
+                        onCommitted: function(v) {
+                            if (rootContext) {
                                 rootContext.shiftXx = v
                                 rootContext.saveCoords()
                             }
@@ -537,7 +550,7 @@ Column {
                         symbol: "+"
                         direction: 1
                         onStepped: function(d) {
-                            if (rootContext) rootContext.shiftXx += d
+                            if (rootContext) rootContext.shiftXx = Math.max(0, Math.min(9999, rootContext.shiftXx + d))
                         }
                         onFinished: function() {
                             if (rootContext) rootContext.saveCoords()
@@ -556,25 +569,17 @@ Column {
                         symbol: "-"
                         direction: -1
                         onStepped: function(d) {
-                            if (rootContext) rootContext.shiftXy = Math.max(0, rootContext.shiftXy + d)
+                            if (rootContext) rootContext.shiftXy = Math.max(0, Math.min(9999, rootContext.shiftXy + d))
                         }
                         onFinished: function() {
                             if (rootContext) rootContext.saveCoords()
                         }
                     }
-                    TextInput {
-                        text: rootContext ? rootContext.shiftXy : 500
-                        color: "#ffffff"
-                        font.family: "JetBrains Mono"
-                        font.pixelSize: 11
-                        width: 38
-                        horizontalAlignment: Text.AlignHCenter
+                    CoordInput {
                         anchors.verticalCenter: parent.verticalCenter
-                        selectByMouse: true
-                        validator: IntValidator { bottom: 0; top: 9999 }
-                        onEditingFinished: {
-                            var v = parseInt(text)
-                            if (!isNaN(v) && rootContext) {
+                        coordValue: rootContext ? rootContext.shiftXy : 500
+                        onCommitted: function(v) {
+                            if (rootContext) {
                                 rootContext.shiftXy = v
                                 rootContext.saveCoords()
                             }
@@ -584,7 +589,7 @@ Column {
                         symbol: "+"
                         direction: 1
                         onStepped: function(d) {
-                            if (rootContext) rootContext.shiftXy += d
+                            if (rootContext) rootContext.shiftXy = Math.max(0, Math.min(9999, rootContext.shiftXy + d))
                         }
                         onFinished: function() {
                             if (rootContext) rootContext.saveCoords()
@@ -600,7 +605,7 @@ Column {
                         width: 50
                         height: 18
                         radius: 9
-                        color: rootContext && (rootContext.shiftXBtn === "0xC0") ? themeContext.geminiRose : "#27272a"
+                        color: rootContext && (rootContext.shiftXBtn === "0xC0") ? tab1Root.colRose : "#27272a"
                         Text {
                             anchors.centerIn: parent
                             text: "左鍵"
@@ -624,7 +629,7 @@ Column {
                         width: 50
                         height: 18
                         radius: 9
-                        color: rootContext && (rootContext.shiftXBtn === "0xC1") ? themeContext.geminiRose : "#27272a"
+                        color: rootContext && (rootContext.shiftXBtn === "0xC1") ? tab1Root.colRose : "#27272a"
                         Text {
                             anchors.centerIn: parent
                             text: "右鍵"
@@ -648,7 +653,7 @@ Column {
                         width: 50
                         height: 18
                         radius: 9
-                        color: rootContext && (rootContext.shiftXBtn === "0xC2") ? themeContext.geminiRose : "#27272a"
+                        color: rootContext && (rootContext.shiftXBtn === "0xC2") ? tab1Root.colRose : "#27272a"
                         Text {
                             anchors.centerIn: parent
                             text: "中鍵"
@@ -680,7 +685,7 @@ Column {
         anchors.horizontalCenter: parent.horizontalCenter
         color: "#18181b"
         border.width: 1
-        border.color: rootContext && rootContext.cursorReturnEnabled ? themeContext.geminiCyan : "#27272a"
+        border.color: rootContext && rootContext.cursorReturnEnabled ? tab1Root.colCyan : "#27272a"
 
         Row {
             anchors.centerIn: parent
@@ -701,7 +706,7 @@ Column {
                 width: 34
                 height: 18
                 radius: 9
-                color: rootContext && rootContext.cursorReturnEnabled ? themeContext.geminiCyan : "#3f3f46"
+                color: rootContext && rootContext.cursorReturnEnabled ? tab1Root.colCyan : "#3f3f46"
                 Rectangle {
                     width: 14
                     height: 14

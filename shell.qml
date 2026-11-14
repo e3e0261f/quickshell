@@ -47,6 +47,8 @@ ShellRoot {
 
     property bool cursorReturnEnabled: true
     property string clickerButtonCode: "0xC0"
+    property bool autoClickerEnabled: false
+    onAutoClickerEnabledChanged: if (!autoClickerEnabled) autoClickerActive = false
     property bool autoClickerActive: false
     property bool autoQActive: false
 
@@ -77,6 +79,7 @@ ShellRoot {
     GlobalShortcut {
         name: "toggle_clicker"
         onPressed: {
+            if (!root.autoClickerEnabled) return;
             root.autoClickerActive = !root.autoClickerActive
             soundPlayer.play("audio-volume-change")
         }
