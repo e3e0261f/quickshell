@@ -125,27 +125,6 @@ Column {
                 spacing: 6
 
                 Rectangle {
-                    width: 54
-                    height: 22
-                    radius: 11
-                    color: tab0Root.isExpanded ? tab0Root.colBlue : "#27272a"
-                    Text {
-                        anchors.centerIn: parent
-                        text: (centerWin && centerWin.cardLarge) ? "⤡ 還原" : "⤢ 放大"
-                        color: tab0Root.isExpanded ? "#18181b" : "#a1a1aa"
-                        font.pixelSize: 9
-                        font.bold: true
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (centerWin) { centerWin.cardFullscreen = false; centerWin.customCardWidth = 0; centerWin.customCardHeight = 0; centerWin.cardLarge = !centerWin.cardLarge }
-                        }
-                    }
-                }
-
-                Rectangle {
                     width: 60
                     height: 22
                     radius: 11

@@ -334,6 +334,28 @@ Variants {
 
                 Rectangle {
                     width: 54; height: 22; radius: 11
+                    color: centerWin.cardLarge ? themeContext.geminiBlue : "#27272a"
+                    border.width: 1; border.color: centerWin.cardLarge ? themeContext.geminiBlue : "#3f3f46"
+                    Text {
+                        anchors.centerIn: parent
+                        text: centerWin.cardLarge ? "⤡ 還原" : "⤢ 放大"
+                        color: centerWin.cardLarge ? "#18181b" : "#e4e4e7"
+                        font.pixelSize: 9; font.bold: true
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            centerWin.cardFullscreen = false
+                            centerWin.customCardWidth = 0
+                            centerWin.customCardHeight = 0
+                            centerWin.cardLarge = !centerWin.cardLarge
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: 54; height: 22; radius: 11
                     color: centerWin.cardFullscreen ? themeContext.geminiCyan : "#27272a"
                     border.width: 1; border.color: centerWin.cardFullscreen ? themeContext.geminiCyan : "#3f3f46"
                     Text {
@@ -345,7 +367,7 @@ Variants {
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: centerWin.cardFullscreen = !centerWin.cardFullscreen
+                        onClicked: { centerWin.cardLarge = false; centerWin.cardFullscreen = !centerWin.cardFullscreen }
                     }
                 }
             }
@@ -382,6 +404,7 @@ Variants {
                         startMouseY = p.y
                         startW = commandCard.width
                         startH = commandCard.height
+                        centerWin.cardLarge = false
                         centerWin.cardFullscreen = false
                         commandCard.isResizing = true
                     }
