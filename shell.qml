@@ -147,38 +147,57 @@ ShellRoot {
         }
     }
 
+    Process {
+        id: strikeExec
+        function runCmd(cmd) {
+            command = ["sh", "-c", cmd]
+            running = false
+            running = true
+        }
+    }
+
+    function mapBtnToHyprKey(btnCode) {
+        if (btnCode === "0xC1") return "mouse:273"
+        if (btnCode === "0xC2") return "mouse:274"
+        return "mouse:272"
+    }
+
+        function executeStrike(tx, ty, btnCode) {
+        var key = mapBtnToHyprKey(btnCode)
+        var moveDelay   = "0.05" // 微動喚醒懸停後停留 50ms（跨過 40ms 懸停門檻）
+        var holdDelay   = "0.05" // 按下到鬆開 50ms（保證低幀率下不吞點擊）
+        var returnDelay = "0.03" // 鬆開後等 30ms 再彈回原位
+
+        var moveTarget = "hyprctl dispatch 'hl.dsp.cursor.move({ x = " + tx + ", y = " + ty + " })'"
+        // 發出 1 像素真實相對移動事件，讓遊戲 UI 觸發 Hover 高亮
+        var nudgeHover = "ydotool mousemove -x 1 -y 0 && sleep 0.01 && ydotool mousemove -x -1 -y 0"
+        var mouseDown  = "hyprctl dispatch 'hl.dsp.send_key_state({ state = \"down\", mods = \"\", key = \"" + key + "\", window = \"activewindow\" })'"
+        var mouseUp    = "hyprctl dispatch 'hl.dsp.send_key_state({ state = \"up\", mods = \"\", key = \"" + key + "\", window = \"activewindow\" })'"
+
+        var script = ""
+        if (root.cursorReturnEnabled) {
+            script = "CUR=$(hyprctl cursorpos 2>/dev/null | tr -d ' '); " +
+                     "CX=${CUR%%,*}; CY=${CUR##*,}; " +
+                     moveTarget + " && sleep 0.01 && " + nudgeHover + " && sleep " + moveDelay + " && " +
+                     mouseDown + " && sleep " + holdDelay + " && " + mouseUp + "; " +
+                     "case \"$CX,$CY\" in ''|*,|,*|*[!0-9,-]*) ;; *) sleep " + returnDelay + "; hyprctl dispatch \"hl.dsp.cursor.move({ x = $CX, y = $CY })\" && ydotool mousemove -x 1 -y 0 ;; esac"
+        } else {
+            script = moveTarget + " && sleep 0.01 && " + nudgeHover + " && sleep " + moveDelay + " && " +
+                     mouseDown + " && sleep " + holdDelay + " && " + mouseUp
+        }
+
+        soundPlayer.play("bell")
+        strikeExec.runCmd(script)
+    }
+
     GlobalShortcut {
         name: "strike_z"
-        onPressed: {
-            var btn = root.shiftZBtn || "0xC0"
-            var script = ""
-            if (root.cursorReturnEnabled) {
-                script = "CUR=$(hyprctl cursorpos 2>/dev/null | tr -d ' '); CX=$(echo $CUR | cut -d, -f1); CY=$(echo $CUR | cut -d, -f2); " +
-                         "ydotool mousemove -a " + root.shiftZx + " " + root.shiftZy + " && ydotool click " + btn + "; " +
-                         "ydotool mousemove -a $CX $CY"
-            } else {
-                script = "ydotool mousemove -a " + root.shiftZx + " " + root.shiftZy + " && ydotool click " + btn
-            }
-            soundPlayer.play("bell")
-            strikeRunner.runScript(script)
-        }
+        onPressed: root.executeStrike(root.shiftZx, root.shiftZy, root.shiftZBtn || "0xC0")
     }
 
     GlobalShortcut {
         name: "strike_x"
-        onPressed: {
-            var btn = root.shiftXBtn || "0xC0"
-            var script = ""
-            if (root.cursorReturnEnabled) {
-                script = "CUR=$(hyprctl cursorpos 2>/dev/null | tr -d ' '); CX=$(echo $CUR | cut -d, -f1); CY=$(echo $CUR | cut -d, -f2); " +
-                         "ydotool mousemove -a " + root.shiftXx + " " + root.shiftXy + " && ydotool click " + btn + "; " +
-                         "ydotool mousemove -a $CX $CY"
-            } else {
-                script = "ydotool mousemove -a " + root.shiftXx + " " + root.shiftXy + " && ydotool click " + btn
-            }
-            soundPlayer.play("bell")
-            strikeRunner.runScript(script)
-        }
+        onPressed: root.executeStrike(root.shiftXx, root.shiftXy, root.shiftXBtn || "0xC0")
     }
 
     Process {
