@@ -47,6 +47,7 @@ Variants {
 
         function closeAll() {
             customTrayMenu.visible = false;
+            rootContext.showSleepBlockers = false;
             isLocked = false;
             isOpen = false;
             stageMode = 0;
@@ -231,7 +232,7 @@ Variants {
         // ============================================================
         // 窗口 2：獨立主彈窗（直接通過 visible 控制開關，徹底告別醜陋縮放特效）
         // ============================================================
-                PanelWindow {
+        PanelWindow {
             id: winBL
             screen: screenScope.modelData
             visible: screenScope.isOpen
@@ -405,34 +406,49 @@ Variants {
                         }
                     }
 
-                    // 2. 固定戰術中台 (84px)
+                    // 2. 戰術中台（默認態支持展開阻塞列表，Wi-Fi/藍牙態固定 84px）
                     Item {
                         width: parent.width
-                        height: 84
+                        height: screenScope.stageMode === 0 ? stageDefaultCol.implicitHeight : 84
                         clip: true
 
-                        // 態 0：默認態 (咖啡因 + 音量)
+                        // 態 0：默認態 (咖啡因 + 可展開阻擋列表 + 音量)
                         Column {
-                            anchors.fill: parent
+                            id: stageDefaultCol
+                            width: parent.width
                             spacing: 8
                             visible: screenScope.stageMode === 0
+
                             Rectangle {
                                 width: parent.width
                                 height: 38
                                 radius: 8
-                                color: "#18181b"
+                                color: sleepBarArea.containsMouse ? "#202024" : "#18181b"
                                 border.width: 1
-                                border.color: rootContext.caffeineActive ? themeContext.geminiGold : "#27272a"
+                                border.color: rootContext.showSleepBlockers ? themeContext.geminiCyan : (rootContext.caffeineActive ? themeContext.geminiGold : "#27272a")
+
+                                // 點擊條的空白/文字處：展開或收起阻塞列表（寫在 Row 前，開關和時間框會優先攔截點擊）
+                                MouseArea {
+                                    id: sleepBarArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        rootContext.showSleepBlockers = !rootContext.showSleepBlockers;
+                                    }
+                                }
+
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 10
                                     Text {
-                                        text: rootContext.caffeineActive ? "☕ 破曉無眠 (常亮)" : "🌙 漏刻入眠 (15分睡眠)"
+                                        text: (rootContext.showSleepBlockers ? "▾ " : "▸ ") + (rootContext.caffeineActive ? "☕ 破曉無眠 (常亮)" : ("🌙 漏刻入眠 (" + rootContext.sleepMinutes + "分睡眠)"))
                                         color: rootContext.caffeineActive ? themeContext.geminiGold : "#e4e4e7"
                                         font.pixelSize: 11
                                         font.bold: true
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
+                                    // 獨立開關滑塊：僅切換常亮 / 睡眠
                                     Rectangle {
                                         width: 34
                                         height: 18
@@ -452,21 +468,31 @@ Variants {
                                                 }
                                             }
                                         }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            anchors.margins: -6
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                rootContext.caffeineActive = !rootContext.caffeineActive;
+                                                rootContext.saveCoords();
+                                            }
+                                        }
                                     }
+                                    // 獨立時間膠囊：點擊循環預設 / 滾輪微調
                                     Rectangle {
                                         width: 48
                                         height: 20
                                         radius: 5
-                                        color: "#27272a"
+                                        color: timeBoxArea.containsMouse ? "#3f3f46" : "#27272a"
                                         border.width: 1
-                                        border.color: "#3f3f46"
+                                        border.color: (!rootContext.caffeineActive && timeBoxArea.containsMouse) ? themeContext.geminiCyan : "#3f3f46"
                                         anchors.verticalCenter: parent.verticalCenter
                                         Text {
                                             anchors.centerIn: parent
                                             text: {
                                                 if (rootContext.caffeineActive)
                                                     return "∞";
-                                                var sec = rootContext.sleepCountdown || 900;
+                                                var sec = (rootContext.sleepCountdown !== undefined && rootContext.sleepCountdown !== null) ? rootContext.sleepCountdown : rootContext.sleepTotalSeconds;
                                                 var m = Math.floor(sec / 60);
                                                 var s = sec % 60;
                                                 return (m < 10 ? "0" + m : m) + ":" + (s < 10 ? "0" + s : s);
@@ -476,17 +502,107 @@ Variants {
                                             font.pixelSize: 10
                                             font.bold: true
                                         }
-                                    }
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        rootContext.caffeineActive = !rootContext.caffeineActive;
-                                        rootContext.saveCoords();
+                                        MouseArea {
+                                            id: timeBoxArea
+                                            anchors.fill: parent
+                                            anchors.margins: -4
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (rootContext.caffeineActive) {
+                                                    rootContext.caffeineActive = false;
+                                                    rootContext.sleepCountdown = rootContext.sleepTotalSeconds;
+                                                } else {
+                                                    var presets = [5, 10, 15, 30, 60];
+                                                    var idx = presets.indexOf(rootContext.sleepMinutes);
+                                                    rootContext.sleepMinutes = presets[(idx + 1) % presets.length];
+                                                }
+                                                rootContext.saveCoords();
+                                            }
+                                            onWheel: wheel => {
+                                                var delta = wheel.angleDelta.y > 0 ? 1 : -1;
+                                                rootContext.caffeineActive = false;
+                                                rootContext.sleepMinutes = Math.max(1, Math.min(120, rootContext.sleepMinutes + delta));
+                                                rootContext.saveCoords();
+                                            }
+                                        }
                                     }
                                 }
                             }
+
+                            // 展開的小列表：實時顯示當前阻擋睡眠倒計時的動作/進程
+                            Rectangle {
+                                visible: rootContext.showSleepBlockers
+                                width: parent.width
+                                height: blockerCol.implicitHeight + 12
+                                radius: 8
+                                color: "#121216"
+                                border.width: 1
+                                border.color: "#2e2e36"
+
+                                Column {
+                                    id: blockerCol
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.margins: 6
+                                    spacing: 4
+
+                                    Text {
+                                        text: "🛡️ 當前阻擋睡眠的動作"
+                                        color: "#71717a"
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                        leftPadding: 4
+                                    }
+
+                                    Repeater {
+                                        model: rootContext.sleepBlockers
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            width: blockerCol.width
+                                            height: 22
+                                            radius: 5
+                                            color: "#18181b"
+                                            Row {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 6
+                                                anchors.rightMargin: 6
+                                                spacing: 6
+                                                Text {
+                                                    text: modelData.icon || "•"
+                                                    font.pixelSize: 10
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                                Rectangle {
+                                                    width: tagTxt.implicitWidth + 8
+                                                    height: 14
+                                                    radius: 3
+                                                    color: "#27272a"
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    Text {
+                                                        id: tagTxt
+                                                        anchors.centerIn: parent
+                                                        text: modelData.tag || ""
+                                                        color: modelData.color || "#a1a1aa"
+                                                        font.pixelSize: 8
+                                                        font.bold: true
+                                                    }
+                                                }
+                                                Text {
+                                                    text: modelData.title || ""
+                                                    color: "#e4e4e7"
+                                                    font.pixelSize: 9
+                                                    elide: Text.ElideRight
+                                                    width: parent.width - 26 - tagTxt.implicitWidth - 16
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             // 音量滑軌
                             Rectangle {
                                 width: parent.width
@@ -1104,7 +1220,10 @@ Variants {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: cmdRunner.run("systemctl suspend")
+                                onClicked: {
+                                    screenScope.closeAll();
+                                    cmdRunner.run("systemctl suspend");
+                                }
                             }
                         }
                         Rectangle {

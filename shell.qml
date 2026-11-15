@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Io
+import Quickshell.Services.Mpris
 
 ShellRoot {
     id: root
@@ -23,17 +24,109 @@ ShellRoot {
     property string currentWifi: "检测中..."
     property string currentIme: "EN"
 
-    // 咖啡因與音量總線
+    // 咖啡因、睡眠定時與阻塞診斷總線
     property bool caffeineActive: true
+    property int sleepMinutes: 15
+    readonly property int sleepTotalSeconds: sleepMinutes * 60
     property int sleepCountdown: 900
+    property double lastSleepTickMs: Date.now()
+    property bool showSleepBlockers: false
+    property bool hasMediaPlaying: false
+    property var sleepBlockers: []
+
     property int systemVolume: 50
     property bool systemMuted: false
 
     onCaffeineActiveChanged: {
-        if (caffeineActive) {
-            strikeRunner.runScript("touch /tmp/caffeine_active")
-        } else {
-            strikeRunner.runScript("rm -f /tmp/caffeine_active")
+        sleepCountdown = sleepTotalSeconds
+        refreshSleepBlockers()
+    }
+
+    onSleepMinutesChanged: {
+        sleepCountdown = sleepTotalSeconds
+    }
+
+    onShowSleepBlockersChanged: {
+        if (showSleepBlockers) refreshSleepBlockers()
+    }
+
+    function refreshSleepBlockers() {
+        var list = []
+        var playing = false
+
+        if (root.caffeineActive) {
+            list.push({
+                icon: "☕",
+                tag: "手動常亮",
+                title: "已開啟「破曉無眠」常亮模式",
+                color: theme.geminiGold
+            })
+        }
+
+        if (!idleMonitor.isIdle) {
+            list.push({
+                icon: "🖱️",
+                tag: "鍵鼠活動",
+                title: "2秒內有鼠標/鍵盤輸入（停住2秒後自動刷新）",
+                color: theme.geminiCyan
+            })
+        }
+
+        // 僅檢測真正處於 Playing 狀態的 MPRIS 媒體源（徹底忽略 Chrome 靜態頁面的假 Wayland 鎖）
+        var vals = Mpris.players.values
+        for (var i = 0; i < vals.length; i++) {
+            var p = vals[i]
+            if (p && (p.isPlaying || p.playbackState === MprisPlaybackState.Playing)) {
+                playing = true
+                var name = p.identity || p.dbusName || "媒體播放器"
+                var track = p.trackTitle || ""
+                list.push({
+                    icon: "▶️",
+                    tag: "Playing",
+                    title: name + (track ? (" · " + track) : ""),
+                    color: "#f59e0b"
+                })
+            }
+        }
+        root.hasMediaPlaying = playing
+
+        if (list.length === 0) {
+            list.push({
+                icon: "✅",
+                tag: "倒計時中",
+                title: "無任何阻擋，正在正常推進睡眠倒計時",
+                color: "#4ade80"
+            })
+        }
+
+        root.sleepBlockers = list
+    }
+
+    // 監聽 MPRIS 播放器列表與播放狀態變化，即時更新阻塞狀態
+    Instantiator {
+        model: Mpris.players
+        delegate: Connections {
+            required property MprisPlayer modelData
+            target: modelData
+            function onIsPlayingChanged() { root.refreshSleepBlockers() }
+            function onPlaybackStateChanged() { root.refreshSleepBlockers() }
+            function onTrackTitleChanged() {
+                if (root.showSleepBlockers) root.refreshSleepBlockers()
+            }
+        }
+    }
+
+    // 只檢測真實鍵鼠輸入空閒（respectInhibitors: false 避開瀏覽器假抑制鎖）
+    IdleMonitor {
+        id: idleMonitor
+        timeout: 2
+        respectInhibitors: false
+        enabled: !root.caffeineActive
+        onIsIdleChanged: {
+            if (!isIdle) {
+                root.sleepCountdown = root.sleepTotalSeconds
+            }
+            root.refreshSleepBlockers()
         }
     }
 
@@ -162,14 +255,13 @@ ShellRoot {
         return "mouse:272"
     }
 
-        function executeStrike(tx, ty, btnCode) {
+    function executeStrike(tx, ty, btnCode) {
         var key = mapBtnToHyprKey(btnCode)
-        var moveDelay   = "0.05" // 微動喚醒懸停後停留 50ms（跨過 40ms 懸停門檻）
-        var holdDelay   = "0.05" // 按下到鬆開 50ms（保證低幀率下不吞點擊）
-        var returnDelay = "0.03" // 鬆開後等 30ms 再彈回原位
+        var moveDelay   = "0.05"
+        var holdDelay   = "0.05"
+        var returnDelay = "0.03"
 
         var moveTarget = "hyprctl dispatch 'hl.dsp.cursor.move({ x = " + tx + ", y = " + ty + " })'"
-        // 發出 1 像素真實相對移動事件，讓遊戲 UI 觸發 Hover 高亮
         var nudgeHover = "ydotool mousemove -x 1 -y 0 && sleep 0.01 && ydotool mousemove -x -1 -y 0"
         var mouseDown  = "hyprctl dispatch 'hl.dsp.send_key_state({ state = \"down\", mods = \"\", key = \"" + key + "\", window = \"activewindow\" })'"
         var mouseUp    = "hyprctl dispatch 'hl.dsp.send_key_state({ state = \"up\", mods = \"\", key = \"" + key + "\", window = \"activewindow\" })'"
@@ -231,18 +323,6 @@ ShellRoot {
         }
     }
 
-    // 倒計時讀取進程 (實時同步守護進程計算好的真實剩餘秒數)
-    Process {
-        id: countdownReader
-        command: ["sh", "-c", "cat /tmp/sleep_countdown 2>/dev/null || echo '900'"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                var v = parseInt(text.trim())
-                if (!isNaN(v)) root.sleepCountdown = v
-            }
-        }
-    }
-
     Process { id: autoClickerRunner; function runScript(cmd) { command = ["sh", "-c", cmd]; running = false; running = true } }
     Process { id: autoQRunner; function runScript(cmd) { command = ["sh", "-c", cmd]; running = false; running = true } }
     Process { id: strikeRunner; function runScript(cmd) { command = ["sh", "-c", cmd]; running = false; running = true } }
@@ -265,7 +345,10 @@ ShellRoot {
                     if (d.snap !== undefined) root.cursorReturnEnabled = d.snap
                     if (d.clickerBtn !== undefined) root.clickerButtonCode = d.clickerBtn
                     if (d.caffeine !== undefined) root.caffeineActive = d.caffeine
+                    if (d.sleepMinutes !== undefined && d.sleepMinutes >= 1) root.sleepMinutes = d.sleepMinutes
                 } catch(e) {}
+                root.sleepCountdown = root.sleepTotalSeconds
+                root.refreshSleepBlockers()
             }
         }
     }
@@ -278,7 +361,8 @@ ShellRoot {
             xx: root.shiftXx, xy: root.shiftXy, xbtn: root.shiftXBtn,
             snap: root.cursorReturnEnabled,
             clickerBtn: root.clickerButtonCode,
-            caffeine: root.caffeineActive
+            caffeine: root.caffeineActive,
+            sleepMinutes: root.sleepMinutes
         }
         var json = JSON.stringify(data)
         saveCoordsProc.command = ["sh", "-c", "echo '" + json + "' > ~/.config/quickshell/coords.json"]
@@ -289,7 +373,7 @@ ShellRoot {
     Component.onCompleted: {
         loadCoordsProc.running = true
         volReader.running = true
-        strikeRunner.runScript("rm -f /tmp/q_spam_enabled /tmp/clicker_enabled /tmp/netmon_pin; pkill -x albion-qspam; pkill -x albion-clicker; pkill -x focus-netmon; pgrep -f sleep_guard.sh >/dev/null || nohup ~/.config/quickshell/sleep_guard.sh >/dev/null 2>&1 &")
+        strikeRunner.runScript("rm -f /tmp/q_spam_enabled /tmp/clicker_enabled /tmp/netmon_pin; pkill -x albion-qspam; pkill -x albion-clicker; pkill -x focus-netmon; pkill -f '[s]leep_guard.sh'")
     }
 
     GlobalShortcut {
@@ -393,9 +477,15 @@ ShellRoot {
         interval: 1000; running: true; repeat: true; triggeredOnStart: true
         onTriggered: {
             var now = new Date()
+            var nowMs = now.getTime()
             var h = now.getHours()
             var m = now.getMinutes()
             var s = now.getSeconds()
+
+            if (nowMs - root.lastSleepTickMs > 5000) {
+                root.sleepCountdown = root.sleepTotalSeconds
+            }
+            root.lastSleepTickMs = nowMs
 
             clock.currentHour = h % 12
             clock.currentMinute = m
@@ -413,8 +503,18 @@ ShellRoot {
                 soundPlayer.play(theme.soundAlarm)
             }
 
-            // 定期刷新心跳 (同步睡眠倒計時、音量與 Wi-Fi)
-            countdownReader.running = false; countdownReader.running = true
+            // 同步媒體 Playing 狀態與睡眠倒計時
+            root.refreshSleepBlockers()
+            if (root.caffeineActive || !idleMonitor.isIdle || root.hasMediaPlaying) {
+                root.sleepCountdown = root.sleepTotalSeconds
+            } else if (root.sleepCountdown > 0) {
+                root.sleepCountdown--
+                if (root.sleepCountdown <= 0) {
+                    root.sleepCountdown = root.sleepTotalSeconds
+                    strikeRunner.runScript("systemctl suspend")
+                }
+            }
+
             if (s % 2 === 0) {
                 wifiProcess.running = false; wifiProcess.running = true
                 imeProcess.running = false; imeProcess.running = true
