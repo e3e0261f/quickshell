@@ -406,18 +406,91 @@ Variants {
                         }
                     }
 
-                    // 2. 戰術中台（默認態支持展開阻塞列表，Wi-Fi/藍牙態固定 84px）
+                    // 2. 戰術中台（默認態支持向上展開阻塞列表，確保下方所有按鈕原地不動）
                     Item {
                         width: parent.width
                         height: screenScope.stageMode === 0 ? stageDefaultCol.implicitHeight : 84
                         clip: true
 
-                        // 態 0：默認態 (咖啡因 + 可展開阻擋列表 + 音量)
+                        // 態 0：默認態 (向上展開的阻擋列表 + 咖啡因條 + 音量)
                         Column {
                             id: stageDefaultCol
                             width: parent.width
                             spacing: 8
                             visible: screenScope.stageMode === 0
+
+                            // 向上展開的小列表：放在睡眠條上方，讓窗口頂部緩衝高度變化，按鈕永遠不跳動
+                            Rectangle {
+                                visible: rootContext.showSleepBlockers
+                                width: parent.width
+                                height: blockerCol.implicitHeight + 12
+                                radius: 8
+                                color: "#121216"
+                                border.width: 1
+                                border.color: "#2e2e36"
+
+                                Column {
+                                    id: blockerCol
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.margins: 6
+                                    spacing: 4
+
+                                    Text {
+                                        text: "🛡️ 當前阻擋睡眠的動作"
+                                        color: "#71717a"
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                        leftPadding: 4
+                                    }
+
+                                    Repeater {
+                                        model: rootContext.sleepBlockers
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            width: blockerCol.width
+                                            height: 22
+                                            radius: 5
+                                            color: "#18181b"
+                                            Row {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 6
+                                                anchors.rightMargin: 6
+                                                spacing: 6
+                                                Text {
+                                                    text: modelData.icon || "•"
+                                                    font.pixelSize: 10
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                                Rectangle {
+                                                    width: tagTxt.implicitWidth + 8
+                                                    height: 14
+                                                    radius: 3
+                                                    color: "#27272a"
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    Text {
+                                                        id: tagTxt
+                                                        anchors.centerIn: parent
+                                                        text: modelData.tag || ""
+                                                        color: modelData.color || "#a1a1aa"
+                                                        font.pixelSize: 8
+                                                        font.bold: true
+                                                    }
+                                                }
+                                                Text {
+                                                    text: modelData.title || ""
+                                                    color: "#e4e4e7"
+                                                    font.pixelSize: 9
+                                                    elide: Text.ElideRight
+                                                    width: parent.width - 26 - tagTxt.implicitWidth - 16
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
 
                             Rectangle {
                                 width: parent.width
@@ -427,7 +500,7 @@ Variants {
                                 border.width: 1
                                 border.color: rootContext.showSleepBlockers ? themeContext.geminiCyan : (rootContext.caffeineActive ? themeContext.geminiGold : "#27272a")
 
-                                // 點擊條的空白/文字處：展開或收起阻塞列表（寫在 Row 前，開關和時間框會優先攔截點擊）
+                                // 點擊條的空白/文字處：向上展開或收起阻塞列表
                                 MouseArea {
                                     id: sleepBarArea
                                     anchors.fill: parent
@@ -442,7 +515,7 @@ Variants {
                                     anchors.centerIn: parent
                                     spacing: 10
                                     Text {
-                                        text: (rootContext.showSleepBlockers ? "▾ " : "▸ ") + (rootContext.caffeineActive ? "☕ 破曉無眠 (常亮)" : ("🌙 漏刻入眠 (" + rootContext.sleepMinutes + "分睡眠)"))
+                                        text: (rootContext.showSleepBlockers ? "▴ " : "▸ ") + (rootContext.caffeineActive ? "☕ 破曉無眠 (常亮)" : ("🌙 漏刻入眠 (" + rootContext.sleepMinutes + "分睡眠)"))
                                         color: rootContext.caffeineActive ? themeContext.geminiGold : "#e4e4e7"
                                         font.pixelSize: 11
                                         font.bold: true
@@ -524,79 +597,6 @@ Variants {
                                                 rootContext.caffeineActive = false;
                                                 rootContext.sleepMinutes = Math.max(1, Math.min(120, rootContext.sleepMinutes + delta));
                                                 rootContext.saveCoords();
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 展開的小列表：實時顯示當前阻擋睡眠倒計時的動作/進程
-                            Rectangle {
-                                visible: rootContext.showSleepBlockers
-                                width: parent.width
-                                height: blockerCol.implicitHeight + 12
-                                radius: 8
-                                color: "#121216"
-                                border.width: 1
-                                border.color: "#2e2e36"
-
-                                Column {
-                                    id: blockerCol
-                                    anchors.top: parent.top
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.margins: 6
-                                    spacing: 4
-
-                                    Text {
-                                        text: "🛡️ 當前阻擋睡眠的動作"
-                                        color: "#71717a"
-                                        font.pixelSize: 9
-                                        font.bold: true
-                                        leftPadding: 4
-                                    }
-
-                                    Repeater {
-                                        model: rootContext.sleepBlockers
-                                        delegate: Rectangle {
-                                            required property var modelData
-                                            width: blockerCol.width
-                                            height: 22
-                                            radius: 5
-                                            color: "#18181b"
-                                            Row {
-                                                anchors.fill: parent
-                                                anchors.leftMargin: 6
-                                                anchors.rightMargin: 6
-                                                spacing: 6
-                                                Text {
-                                                    text: modelData.icon || "•"
-                                                    font.pixelSize: 10
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                }
-                                                Rectangle {
-                                                    width: tagTxt.implicitWidth + 8
-                                                    height: 14
-                                                    radius: 3
-                                                    color: "#27272a"
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    Text {
-                                                        id: tagTxt
-                                                        anchors.centerIn: parent
-                                                        text: modelData.tag || ""
-                                                        color: modelData.color || "#a1a1aa"
-                                                        font.pixelSize: 8
-                                                        font.bold: true
-                                                    }
-                                                }
-                                                Text {
-                                                    text: modelData.title || ""
-                                                    color: "#e4e4e7"
-                                                    font.pixelSize: 9
-                                                    elide: Text.ElideRight
-                                                    width: parent.width - 26 - tagTxt.implicitWidth - 16
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                }
                                             }
                                         }
                                     }

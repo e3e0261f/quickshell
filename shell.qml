@@ -121,7 +121,7 @@ ShellRoot {
         id: idleMonitor
         timeout: 2
         respectInhibitors: false
-        enabled: !root.caffeineActive
+        enabled: true
         onIsIdleChanged: {
             if (!isIdle) {
                 root.sleepCountdown = root.sleepTotalSeconds
