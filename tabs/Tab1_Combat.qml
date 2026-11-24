@@ -228,7 +228,7 @@ Column {
 
     Text {
         anchors.horizontalCenter: parent.horizontalCenter
-        text: "ALBION & COMBAT HUD (YDO-TOOL ENGINE)"
+        text: "ALBION & COMBAT HUD (RUST BINARIES + HYPRLAND)"
         color: themeContext ? themeContext.geminiGold : "#fde047"
         font.pixelSize: 10; font.bold: true; font.letterSpacing: 1
     }
@@ -248,8 +248,8 @@ Column {
                     width: parent.width; height: 28
                     Column {
                         anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-                        Text { text: "鼠標連擊 (左+右鍵)"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                        Text { text: "12 次/秒 · 點擊開關"; color: "#71717a"; font.pixelSize: 9 }
+                        Text { text: "鼠標連擊 (左/右/中鍵)"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "albion-clicker --hold · 點擊開關"; color: "#71717a"; font.pixelSize: 9 }
                     }
                     Rectangle {
                         anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
@@ -468,6 +468,64 @@ Column {
             MouseArea {
                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                 onClicked: if (scriptRunner) scriptRunner.run("notify-send 'Albion HUD' '遊戲環境優化腳本已觸發'")
+            }
+        }
+    }
+
+    // 第六行：Rust 二進制運行狀態與 Debug 日誌控制台 (/tmp/quickshell_combat_debug.log)
+    Rectangle {
+        width: Math.min(920, parent.width - 32); anchors.horizontalCenter: parent.horizontalCenter
+        height: 150; radius: 10; color: "#111115"; border.color: "#27272a"; border.width: 1
+        Column {
+            anchors.fill: parent; anchors.margins: 10; spacing: 6
+            Item {
+                width: parent.width; height: 22
+                Row {
+                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; spacing: 10
+                    Text {
+                        text: "🐞 DEBUG 日誌 (同步至終端與 /tmp/quickshell_combat_debug.log)"
+                        color: themeContext ? themeContext.geminiCyan : "#38bdf8"
+                        font.pixelSize: 9; font.bold: true
+                    }
+                    Text {
+                        text: "連擊:" + ((rootContext && rootContext.clickerRunningReal) ? "●運行" : "○停止") +
+                              "  連Q:" + ((rootContext && rootContext.qspamRunningReal) ? "●運行" : "○停止")
+                        color: ((rootContext && rootContext.clickerRunningReal) || (rootContext && rootContext.qspamRunningReal)) ? "#4ade80" : "#71717a"
+                        font.family: "monospace"; font.pixelSize: 9; font.bold: true
+                    }
+                }
+                Row {
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 6
+                    Rectangle {
+                        width: 78; height: 20; radius: 10; color: "#1e1b4b"; border.color: themeContext.geminiCyan; border.width: 1
+                        Text { anchors.centerIn: parent; text: "🩺 診斷環境"; color: "#7dd3fc"; font.pixelSize: 8; font.bold: true }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: if (rootContext) rootContext.runCombatEnvDiagnostics()
+                        }
+                    }
+                    Rectangle {
+                        width: 54; height: 20; radius: 10; color: "#27272a"; border.color: "#3f3f46"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "🗑 清空"; color: "#a1a1aa"; font.pixelSize: 8; font.bold: true }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: if (rootContext) rootContext.clearCombatLogs()
+                        }
+                    }
+                }
+            }
+
+            ListView {
+                width: parent.width; height: parent.height - 28; clip: true; spacing: 2
+                model: rootContext ? rootContext.combatDebugLogs : []
+                delegate: Text {
+                    required property var modelData
+                    width: ListView.view.width
+                    text: String(modelData)
+                    color: (String(modelData).indexOf("ERR") !== -1 || String(modelData).indexOf("⚠️") !== -1) ? "#fda4af" : "#a1a1aa"
+                    font.family: "monospace"; font.pixelSize: 8
+                    wrapMode: Text.WrapAnywhere
+                }
             }
         }
     }

@@ -78,6 +78,7 @@ PanelWindow {
         id: scriptRunner
         function run(cmdStr) {
             command = ["sh", "-c", cmdStr];
+            running = false;
             running = true;
         }
     }

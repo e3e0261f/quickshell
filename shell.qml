@@ -252,21 +252,41 @@ ShellRoot {
         clipboardReader.running = true;
     }
 
+    function mapBtnToHyprKey(btnCode) {
+        if (btnCode === "0xC1") return "mouse:273";
+        if (btnCode === "0xC2") return "mouse:274";
+        return "mouse:272";
+    }
+
     function executeStrikeSequence(label, points) {
         if (!points || points.length === 0) return;
+        var moveDelay = "0.05";
+        var holdDelay = "0.05";
+        var returnDelay = "0.03";
         var cmds = [];
+
         if (root.cursorReturnEnabled) {
-            cmds.push("CUR=$(hyprctl cursorpos); CX=$(echo $CUR | cut -d',' -f1 | tr -d ' '); CY=$(echo $CUR | cut -d',' -f2 | tr -d ' ')");
+            cmds.push("CUR=$(hyprctl cursorpos 2>/dev/null | tr -d ' '); CX=${CUR%%,*}; CY=${CUR##*,}");
         }
+
         for (var i = 0; i < points.length; i++) {
             var pt = points[i];
-            cmds.push("ydotool mousemove -a " + pt.x + " " + pt.y + " && ydotool click " + pt.btn);
+            var key = mapBtnToHyprKey(pt.btn || "0xC0");
+            var moveTarget = "hyprctl dispatch 'hl.dsp.cursor.move({ x = " + pt.x + ", y = " + pt.y + " })'";
+            var nudgeHover = "ydotool mousemove -x 1 -y 0 && sleep 0.01 && ydotool mousemove -x -1 -y 0";
+            var mouseDown  = "hyprctl dispatch 'hl.dsp.send_key_state({ state = \"down\", mods = \"\", key = \"" + key + "\", window = \"activewindow\" })'";
+            var mouseUp    = "hyprctl dispatch 'hl.dsp.send_key_state({ state = \"up\", mods = \"\", key = \"" + key + "\", window = \"activewindow\" })'";
+            cmds.push(moveTarget + " && sleep 0.01 && " + nudgeHover + " && sleep " + moveDelay + " && " + mouseDown + " && sleep " + holdDelay + " && " + mouseUp);
             if (i < points.length - 1) cmds.push("sleep 0.04");
         }
+
         if (root.cursorReturnEnabled) {
-            cmds.push("ydotool mousemove -a $CX $CY");
+            cmds.push("case \"$CX,$CY\" in ''|*,|,*|*[!0-9,-]*) ;; *) sleep " + returnDelay + "; hyprctl dispatch \"hl.dsp.cursor.move({ x = $CX, y = $CY })\" && ydotool mousemove -x 1 -y 0 ;; esac");
         }
+
+        appendCombatLog("STRIKE", label + " -> 執行 " + points.length + " 點打擊");
         strikeExec.command = ["sh", "-c", cmds.join("; ")];
+        strikeExec.running = false;
         strikeExec.running = true;
         soundPlayer.play(theme.soundAlarm);
     }
@@ -296,17 +316,18 @@ ShellRoot {
             "sleepMinutes": root.sleepMinutes
         };
         saveCoordsProc.command = ["sh", "-c", "cat <<'EOF' > \"$HOME/.config/quickshell/coords.json\"\n" + JSON.stringify(payload, null, 2) + "\nEOF"];
+        saveCoordsProc.running = false;
         saveCoordsProc.running = true;
     }
 
     Process {
         id: loadCoordsProc
-        command: ["sh", "-c", "cat \"$HOME/.config/quickshell/coords.json\" 2>/dev/null || cat ./coords.json 2>/dev/null"]
+        command: ["sh", "-c", "cat \"$HOME/.config/quickshell/coords.json\" 2>/dev/null || cat ./coords.json 2>/dev/null || echo '{}'"]
         running: true
-        stdout: SplitParser {
-            splitMarker: ""
-            onRead: function(data) {
-                if (!data || data.trim() === "") return;
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var data = text.trim();
+                if (!data) return;
                 try {
                     var obj = JSON.parse(data);
                     if (obj.zPoints && obj.zPoints.length > 0) {
@@ -322,7 +343,7 @@ ShellRoot {
                     if (obj.snap !== undefined) root.cursorReturnEnabled = !!obj.snap;
                     if (obj.clickerBtn) root.clickerButtonCode = String(obj.clickerBtn);
                     if (obj.caffeine !== undefined) root.caffeineActive = !!obj.caffeine;
-                    if (obj.sleepMinutes !== undefined) {
+                    if (obj.sleepMinutes !== undefined && obj.sleepMinutes >= 1) {
                         root.sleepMinutes = Number(obj.sleepMinutes);
                         root.sleepCountdown = root.sleepMinutes * 60;
                     }
@@ -360,24 +381,214 @@ ShellRoot {
         onPressed: root.executeStrikeSequence("Alt+X", root.xPoints)
     }
 
-    Process { id: strikeExec }
+    Process {
+        id: strikeExec
+        stderr: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("STRIKE-ERR", s);
+            }
+        }
+    }
+
+    readonly property string clickerBinPath: Qt.resolvedUrl("albion-clicker").toString().replace(/^file:\/\//, "")
+    readonly property string qspamBinPath: Qt.resolvedUrl("albion-qspam").toString().replace(/^file:\/\//, "")
+
+    property var combatDebugLogs: []
+    property bool clickerRunningReal: autoClickerRunner.running
+    property bool qspamRunningReal: autoQRunner.running
+
+    function appendCombatLog(tag, msg) {
+        var line = "[" + clockObj.fullTimeString + "] [" + tag + "] " + String(msg);
+        console.warn("[CombatHUD]", line);
+        var next = [line];
+        for (var i = 0; i < root.combatDebugLogs.length && next.length < 40; i++) {
+            next.push(root.combatDebugLogs[i]);
+        }
+        root.combatDebugLogs = next;
+        debugFlushTimer.restart();
+    }
+
+    function clearCombatLogs() {
+        root.combatDebugLogs = [];
+        debugFileWriter.clearFile();
+    }
+
+    function runCombatEnvDiagnostics() {
+        appendCombatLog("DIAG", "開始檢查 albion-clicker / albion-qspam / 鎖定文件 / /dev/uinput...");
+        combatDiagProc.running = false;
+        combatDiagProc.running = true;
+    }
+
+    Component.onCompleted: {
+        scriptRunner.run("rm -f /tmp/q_spam_enabled /tmp/clicker_enabled /tmp/netmon_pin; pkill -x albion-qspam 2>/dev/null || true; pkill -x albion-clicker 2>/dev/null || true; pkill -x focus-netmon 2>/dev/null || true; pkill -f '[s]leep_guard.sh' 2>/dev/null || true");
+        appendCombatLog("INIT", "Quickshell 已初始化並清理舊鎖定文件 (/tmp/clicker_enabled, /tmp/q_spam_enabled)");
+    }
+
+    Timer {
+        id: debugFlushTimer
+        interval: 150; repeat: false
+        onTriggered: debugFileWriter.flush(root.combatDebugLogs)
+    }
+
+    Process {
+        id: debugFileWriter
+        function flush(lines) {
+            var body = lines.slice().reverse().join("\n");
+            command = ["sh", "-c", "cat <<'EOF' > /tmp/quickshell_combat_debug.log\n" + body + "\nEOF"];
+            running = false;
+            running = true;
+        }
+        function clearFile() {
+            command = ["sh", "-c", ": > /tmp/quickshell_combat_debug.log"];
+            running = false;
+            running = true;
+        }
+    }
+
+    Process {
+        id: combatDiagProc
+        command: [
+            "sh", "-c",
+            "echo \"SHELL_DIR=$(dirname " + JSON.stringify(root.clickerBinPath) + ")\"; " +
+            "ls -la " + JSON.stringify(root.clickerBinPath) + " " + JSON.stringify(root.qspamBinPath) + " \"$HOME/.config/quickshell/albion-clicker\" \"$HOME/.config/quickshell/albion-qspam\" 2>&1; " +
+            "echo \"LOCK_CLICKER=$( [ -e /tmp/clicker_enabled ] && echo YES || echo NO ) BTN=$(cat /tmp/clicker_btn 2>/dev/null || echo unset) LOCK_Q=$( [ -e /tmp/q_spam_enabled ] && echo YES || echo NO )\"; " +
+            "ls -la /dev/uinput /tmp/.ydotool_socket \"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/.ydotool_socket\" 2>&1; " +
+            "pgrep -af 'ydotoold|albion-clicker|albion-qspam' 2>&1 || echo 'NO_DAEMON_RUNNING'"
+        ]
+        stdout: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("DIAG", s);
+            }
+        }
+        stderr: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("DIAG-ERR", s);
+            }
+        }
+    }
+
+    onAutoClickerEnabledChanged: {
+        appendCombatLog("CLICKER", "開關切換 -> " + (autoClickerEnabled ? "ON" : "OFF") + " (按鍵=" + clickerButtonCode + " --hold)");
+        if (autoClickerEnabled) {
+            autoClickerRunner.running = false;
+            autoClickerRunner.running = true;
+        } else {
+            autoClickerRunner.running = false;
+            clickerKillProc.running = false;
+            clickerKillProc.running = true;
+        }
+    }
+
+    onClickerButtonCodeChanged: {
+        appendCombatLog("CLICKER", "切換連擊按鍵 -> " + clickerButtonCode);
+        if (root.autoClickerEnabled) {
+            clickerBtnWriter.command = ["sh", "-c", "printf '%s' " + JSON.stringify(root.clickerButtonCode) + " > /tmp/clicker_btn"];
+            clickerBtnWriter.running = false;
+            clickerBtnWriter.running = true;
+        }
+    }
+
+    onAutoQActiveChanged: {
+        appendCombatLog("QSPAM", "開關切換 -> " + (autoQActive ? "ON" : "OFF"));
+        if (autoQActive) {
+            autoQRunner.running = false;
+            autoQRunner.running = true;
+        } else {
+            autoQRunner.running = false;
+            qspamKillProc.running = false;
+            qspamKillProc.running = true;
+        }
+    }
+
+    Process { id: clickerBtnWriter }
+
+    Process {
+        id: clickerKillProc
+        command: ["sh", "-c", "rm -f /tmp/clicker_enabled; pkill -x albion-clicker 2>/dev/null || true"]
+    }
+
+    Process {
+        id: qspamKillProc
+        command: ["sh", "-c", "rm -f /tmp/q_spam_enabled; pkill -x albion-qspam 2>/dev/null || true"]
+    }
 
     Process {
         id: autoClickerRunner
-        command: ["sh", "-c", "while true; do ydotool click " + root.clickerButtonCode + "; sleep 0.08; done"]
-        running: root.autoClickerEnabled
+        command: [
+            "sh", "-c",
+            "pkill -x albion-clicker 2>/dev/null || true; " +
+            "printf '%s' " + JSON.stringify(root.clickerButtonCode) + " > /tmp/clicker_btn && " +
+            "touch /tmp/clicker_enabled && " +
+            "BIN=" + JSON.stringify(root.clickerBinPath) + "; " +
+            "[ -x \"$BIN\" ] || BIN=\"$HOME/.config/quickshell/albion-clicker\"; " +
+            "if [ ! -e \"$BIN\" ]; then echo \"ERR: binary not found at $BIN\" >&2; exit 127; fi; " +
+            "if [ ! -x \"$BIN\" ]; then chmod +x \"$BIN\" 2>/dev/null || true; fi; " +
+            "echo \"LAUNCH $BIN --hold (btn=" + root.clickerButtonCode + ")\"; " +
+            "exec \"$BIN\" --hold 2>&1"
+        ]
+        onStarted: root.appendCombatLog("CLICKER", "albion-clicker --hold 已啟動 (/tmp/clicker_enabled 已建立)")
+        onExited: function(code, status) {
+            root.appendCombatLog("CLICKER", "進程退出 code=" + code + " status=" + status);
+            if (root.autoClickerEnabled && code !== 0) {
+                root.appendCombatLog("CLICKER", "⚠️ albion-clicker 異常退出，請查看上方日誌或點擊「🩺 診斷環境」");
+            }
+        }
+        stdout: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("CLICKER-OUT", s);
+            }
+        }
+        stderr: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("CLICKER-ERR", s);
+            }
+        }
     }
 
     Process {
         id: autoQRunner
-        command: ["sh", "-c", "$HOME/.config/quickshell/albion-qspam || ./albion-qspam"]
-        running: root.autoQActive
+        command: [
+            "sh", "-c",
+            "pkill -x albion-qspam 2>/dev/null || true; " +
+            "touch /tmp/q_spam_enabled && " +
+            "BIN=" + JSON.stringify(root.qspamBinPath) + "; " +
+            "[ -x \"$BIN\" ] || BIN=\"$HOME/.config/quickshell/albion-qspam\"; " +
+            "if [ ! -e \"$BIN\" ]; then echo \"ERR: binary not found at $BIN\" >&2; exit 127; fi; " +
+            "if [ ! -x \"$BIN\" ]; then chmod +x \"$BIN\" 2>/dev/null || true; fi; " +
+            "echo \"LAUNCH $BIN (/tmp/q_spam_enabled 已建立)\"; " +
+            "exec \"$BIN\" 2>&1"
+        ]
+        onStarted: root.appendCombatLog("QSPAM", "albion-qspam 已啟動 (/tmp/q_spam_enabled 已建立)")
+        onExited: function(code, status) {
+            root.appendCombatLog("QSPAM", "進程退出 code=" + code + " status=" + status);
+            if (root.autoQActive && code !== 0) {
+                root.appendCombatLog("QSPAM", "⚠️ albion-qspam 異常退出，請查看上方日誌或點擊「🩺 診斷環境」");
+            }
+        }
+        stdout: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("QSPAM-OUT", s);
+            }
+        }
+        stderr: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("QSPAM-ERR", s);
+            }
+        }
     }
 
     Process {
         id: scriptRunner
         function run(cmdStr) {
             command = ["sh", "-c", cmdStr];
+            running = false;
             running = true;
         }
     }
@@ -386,6 +597,7 @@ ShellRoot {
         id: clipboardWriter
         function copy(text) {
             command = ["sh", "-c", "printf '%s' " + JSON.stringify(String(text)) + " | wl-copy 2>/dev/null || true"];
+            running = false;
             running = true;
         }
     }
@@ -436,20 +648,26 @@ ShellRoot {
         id: soundPlayer
         function play(soundName) {
             if (!soundName) return;
-            command = ["sh", "-c", "canberra-gtk-play -i " + soundName + " -V " + theme.soundVolume + " 2>/dev/null || true"];
+            command = ["canberra-gtk-play", "-i", soundName, "-V", theme.soundVolume];
+            running = false;
             running = true;
         }
     }
 
     Process {
         id: volReader
-        command: ["sh", "-c", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null"]
+        command: ["sh", "-c", "wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || pamixer --get-volume 2>/dev/null || echo 'Volume: 0.50'"]
         running: true
-        stdout: SplitParser {
-            onRead: function(line) {
-                var m = String(line).match(/Volume:\s*([0-9.]+)/);
-                if (m) root.systemVolume = Math.round(parseFloat(m[1]) * 100);
-                root.systemMuted = String(line).indexOf("[MUTED]") !== -1;
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var str = text.trim();
+                root.systemMuted = str.indexOf("MUTED") !== -1;
+                var m = str.match(/([0-9]+(\.[0-9]+)?)/);
+                if (m) {
+                    var val = parseFloat(m[1]);
+                    if (val <= 1.0) val = Math.round(val * 100);
+                    root.systemVolume = Math.min(100, Math.max(0, Math.round(val)));
+                }
             }
         }
     }
@@ -460,36 +678,38 @@ ShellRoot {
             var clamped = Math.max(0, Math.min(100, Math.round(pct)));
             root.systemVolume = clamped;
             if (clamped > 0 && root.systemMuted) root.systemMuted = false;
-            command = ["sh", "-c", "wpctl set-volume @DEFAULT_AUDIO_SINK@ " + (clamped / 100.0).toFixed(2)];
+            command = ["sh", "-c", "wpctl set-volume @DEFAULT_AUDIO_SINK@ " + (clamped / 100.0).toFixed(2) + " 2>/dev/null || pamixer --set-volume " + clamped];
+            running = false;
             running = true;
         }
         function toggleMute() {
             root.systemMuted = !root.systemMuted;
-            command = ["sh", "-c", "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"];
+            command = ["sh", "-c", "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle 2>/dev/null || pamixer -t"];
+            running = false;
             running = true;
         }
     }
 
     Process {
         id: wifiProcess
-        command: ["sh", "-c", "SSID=$(nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | grep -i '^yes:' | head -n1 | cut -d: -f2-); [ -z \"$SSID\" ] && SSID=$(iwgetid -r 2>/dev/null); echo \"$SSID\""]
+        command: ["sh", "-c", "nmcli -t -f TYPE,CONNECTION dev | grep '^wifi:' | cut -d: -f2 | grep -v '^--$' | head -n1 || echo '未連接'"]
         running: true
-        stdout: SplitParser {
-            onRead: function(line) {
-                var s = String(line).trim();
-                root.currentWifi = s !== "" ? s : "未連接";
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var s = text.trim();
+                root.currentWifi = s.length > 0 ? s : "未連接";
             }
         }
     }
 
     Process {
         id: imeProcess
-        command: ["sh", "-c", "S=$(fcitx5-remote 2>/dev/null); [ \"$S\" = \"2\" ] && echo '中 (拼音)' || echo 'EN (英文)'"]
+        command: ["sh", "-c", "STATE=$(fcitx5-remote 2>/dev/null); if [ \"$STATE\" = \"2\" ]; then echo '中 (拼音)'; else echo 'EN (英文)'; fi"]
         running: true
-        stdout: SplitParser {
-            onRead: function(line) {
-                var s = String(line).trim();
-                if (s !== "") root.currentIme = s;
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var val = text.trim();
+                if (val.length > 0) root.currentIme = val;
             }
         }
     }
@@ -531,11 +751,11 @@ ShellRoot {
         interval: root.inspectMode ? 250 : 1200
         running: true; repeat: true
         onTriggered: {
-            cursorTracker.running = true;
-            activeWinTracker.running = true;
-            volReader.running = true;
-            wifiProcess.running = true;
-            imeProcess.running = true;
+            if (!cursorTracker.running) cursorTracker.running = true;
+            if (!activeWinTracker.running) activeWinTracker.running = true;
+            if (!volReader.running) volReader.running = true;
+            if (!wifiProcess.running) wifiProcess.running = true;
+            if (!imeProcess.running) imeProcess.running = true;
         }
     }
 

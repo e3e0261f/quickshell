@@ -29,11 +29,12 @@ Item {
     property string btName: "未連線"
     property bool btDiscoverable: false
     property bool btPairable: false
+    property bool hasPairRequest: false
+    property string pairReqMac: ""
+    property string pairReqPasskey: ""
     property bool trayMenuVisible: false
     property var activeTrayMenu: null
 
-    property var wifiList: []
-    property var btDeviceList: []
     property var sleepBlockerList: []
 
     function refreshSleepBlockers() {
@@ -71,147 +72,145 @@ Item {
         return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
     }
 
-    property string wifiBuf: ""
-    property string btStatusBuf: ""
-    property string btDevsBuf: ""
+    function connectBt(mac) {
+        var cmd = "bluetoothctl info " + mac + " | grep -q 'Connected: yes' && bluetoothctl disconnect " + mac + " || (bluetoothctl pair " + mac + " 2>/dev/null; bluetoothctl trust " + mac + " 2>/dev/null; bluetoothctl connect " + mac + ")";
+        cmdRunner.run(cmd);
+        stageMode = 0;
+        btStatusProc.running = false;
+        btStatusProc.running = true;
+    }
 
     Process {
-        id: wifiScanProc
-        property bool forceRescan: false
-        command: ["sh", "-c", forceRescan
-            ? "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list --rescan yes 2>/dev/null | head -n 15"
-            : "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list 2>/dev/null | head -n 15"]
-        onRunningChanged: {
-            if (running) tab3.wifiBuf = "";
-            else {
-                var next = [];
-                var seen = {};
-                var lines = tab3.wifiBuf.trim().split("\n");
-                for (var i = 0; i < lines.length; i++) {
-                    if (!lines[i]) continue;
-                    var raw = lines[i].replace(/\\:/g, "\u0000");
-                    var parts = raw.split(":");
-                    if (parts.length >= 3) {
-                        var inUse = parts[0].trim() === "*";
-                        var ssid = parts[1].replace(/\u0000/g, ":").trim();
-                        if (ssid === "" || seen[ssid]) continue;
-                        seen[ssid] = true;
-                        next.push({
-                            "inUse": inUse,
-                            "ssid": ssid,
-                            "signal": parseInt(parts[2], 10) || 0,
-                            "security": (parts[3] || "").trim()
-                        });
-                    }
-                }
-                tab3.wifiList = next;
-                tab3.wifiScanning = false;
-                wifiScanProc.forceRescan = false;
-            }
-        }
-        stdout: SplitParser {
-            splitMarker: ""
-            onRead: function(data) { tab3.wifiBuf += String(data); }
+        id: cmdRunner
+        function run(cmd) {
+            command = ["sh", "-c", cmd];
+            running = false;
+            running = true;
         }
     }
 
     Process {
-        id: wifiConnectProc
-        function connectTo(ssid) {
-            if (rootContext) rootContext.currentWifi = ssid;
-            command = ["sh", "-c", "nmcli device wifi connect " + JSON.stringify(String(ssid)) + " 2>/dev/null"];
-            running = true;
+        id: pairReqReader
+        command: ["sh", "-c", "cat /tmp/bt_pair_request 2>/dev/null || echo ''"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var str = text.trim();
+                if (str.length > 0 && str.indexOf("|") !== -1) {
+                    var p = str.split("|");
+                    tab3.pairReqMac = p[0];
+                    tab3.pairReqPasskey = p[1];
+                    tab3.hasPairRequest = true;
+                } else {
+                    tab3.hasPairRequest = false;
+                }
+            }
         }
-        onRunningChanged: {
-            if (!running) {
+    }
+
+    ListModel { id: wifiListModel }
+
+    Process {
+        id: scanWifiProc
+        command: ["sh", "-c", "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list --rescan yes 2>/dev/null | awk -F: '$2 != \"\"' | head -n 4"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                wifiListModel.clear();
+                var lines = text.trim().split("\n");
+                for (var i = 0; i < lines.length; i++) {
+                    if (!lines[i]) continue;
+                    var parts = lines[i].split(":");
+                    if (parts.length >= 3) {
+                        wifiListModel.append({
+                            inUse: parts[0] === "*",
+                            ssid: parts[1],
+                            signal: parseInt(parts[2]) || 50,
+                            security: parts[3] || ""
+                        });
+                    }
+                }
                 tab3.wifiScanning = false;
-                wifiScanProc.running = true;
+            }
+        }
+    }
+
+    ListModel { id: btListModel }
+
+    Process {
+        id: scanBtProc
+        command: ["sh", "-c", "bluetoothctl devices 2>/dev/null | head -n 4"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                btListModel.clear();
+                var lines = text.trim().split("\n");
+                for (var i = 0; i < lines.length; i++) {
+                    if (!lines[i]) continue;
+                    var p = lines[i].split(" ");
+                    if (p.length >= 3 && p[0] === "Device") {
+                        btListModel.append({
+                            mac: p[1],
+                            name: p.slice(2).join(" ")
+                        });
+                    }
+                }
+                tab3.btScanning = false;
+            }
+        }
+    }
+
+    Process {
+        id: startScanBtProc
+        command: ["sh", "-c", "timeout 5 bluetoothctl scan on >/dev/null 2>&1; bluetoothctl devices 2>/dev/null | head -n 4"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                btListModel.clear();
+                var lines = text.trim().split("\n");
+                for (var i = 0; i < lines.length; i++) {
+                    if (!lines[i]) continue;
+                    var p = lines[i].split(" ");
+                    if (p.length >= 3 && p[0] === "Device") {
+                        btListModel.append({
+                            mac: p[1],
+                            name: p.slice(2).join(" ")
+                        });
+                    }
+                }
+                tab3.btScanning = false;
             }
         }
     }
 
     Process {
         id: btStatusProc
-        command: ["sh", "-c", "bluetoothctl show 2>/dev/null; echo '---DEVS---'; bluetoothctl devices Connected 2>/dev/null"]
+        command: ["sh", "-c",
+            "PWR=$(bluetoothctl show 2>/dev/null | grep -m1 'Powered:' | awk '{print $2}'); " +
+            "DISC=$(bluetoothctl show 2>/dev/null | grep -m1 'Discoverable:' | awk '{print $2}'); " +
+            "PAIR=$(bluetoothctl show 2>/dev/null | grep -m1 'Pairable:' | awk '{print $2}'); " +
+            "DEV=$(bluetoothctl devices Connected 2>/dev/null | head -n1 | cut -d ' ' -f 3-); " +
+            "echo \"$PWR|$DISC|$PAIR|$DEV\""
+        ]
         running: true
-        onRunningChanged: {
-            if (running) tab3.btStatusBuf = "";
-            else {
-                var txt = tab3.btStatusBuf;
-                if (txt.indexOf("Powered: yes") !== -1) {
-                    tab3.btDiscoverable = txt.indexOf("Discoverable: yes") !== -1;
-                    tab3.btPairable = txt.indexOf("Pairable: yes") !== -1;
-                    var after = txt.split("---DEVS---")[1] || "";
-                    var m = after.match(/Device\s+([0-9A-Fa-f:]+)\s+(.+)/);
-                    if (m) {
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var parts = text.trim().split("|");
+                if (parts.length >= 3) {
+                    var pwr = parts[0];
+                    var disc = parts[1];
+                    var pair = parts[2];
+                    var dev = parts[3] || "";
+                    tab3.btDiscoverable = (disc === "yes");
+                    tab3.btPairable = (pair === "yes");
+
+                    if (pwr !== "yes") {
+                        tab3.btState = "OFF";
+                        tab3.btName = "已關閉";
+                    } else if (dev !== "") {
                         tab3.btState = "CONN";
-                        tab3.btName = m[2].trim();
+                        tab3.btName = dev;
                     } else {
                         tab3.btState = "ON";
                         tab3.btName = "未連線";
                     }
-                } else if (txt.trim() !== "") {
-                    tab3.btState = "OFF";
-                    tab3.btName = "已關閉";
-                    tab3.btDiscoverable = false;
-                    tab3.btPairable = false;
                 }
-            }
-        }
-        stdout: SplitParser {
-            splitMarker: ""
-            onRead: function(data) { tab3.btStatusBuf += String(data); }
-        }
-    }
-
-    Process {
-        id: btDevicesProc
-        command: ["sh", "-c", "bluetoothctl devices Paired 2>/dev/null; bluetoothctl devices 2>/dev/null"]
-        running: true
-        onRunningChanged: {
-            if (running) tab3.btDevsBuf = "";
-            else {
-                var next = [];
-                var seenMac = {};
-                var lines = tab3.btDevsBuf.trim().split("\n");
-                for (var i = 0; i < lines.length; i++) {
-                    var m = lines[i].match(/Device\s+([0-9A-Fa-f:]+)\s+(.+)/);
-                    if (m && !seenMac[m[1]]) {
-                        seenMac[m[1]] = true;
-                        next.push({ "mac": m[1], "name": m[2].trim() });
-                    }
-                }
-                tab3.btDeviceList = next;
-                tab3.btScanning = false;
-            }
-        }
-        stdout: SplitParser {
-            splitMarker: ""
-            onRead: function(data) { tab3.btDevsBuf += String(data); }
-        }
-    }
-
-    Process {
-        id: btActionProc
-        function exec(cmdStr) {
-            command = ["sh", "-c", cmdStr];
-            running = true;
-        }
-        onRunningChanged: {
-            if (!running) {
-                btStatusProc.running = true;
-                btDevicesProc.running = true;
-            }
-        }
-    }
-
-    Process {
-        id: btScanProc
-        command: ["sh", "-c", "bluetoothctl --timeout 6 scan on >/dev/null 2>&1 || true"]
-        onRunningChanged: {
-            if (!running) {
-                tab3.btScanning = false;
-                btDevicesProc.running = true;
             }
         }
     }
@@ -220,7 +219,8 @@ Item {
         interval: 1500; running: true; repeat: true; triggeredOnStart: true
         onTriggered: {
             tab3.refreshSleepBlockers();
-            if (!btActionProc.running) btStatusProc.running = true;
+            if (!btStatusProc.running) btStatusProc.running = true;
+            if (!pairReqReader.running) pairReqReader.running = true;
         }
     }
 
@@ -266,8 +266,21 @@ Item {
                                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     tab3.wifiScanning = true;
-                                    wifiScanProc.forceRescan = true;
-                                    wifiScanProc.running = true;
+                                    scanWifiProc.running = false;
+                                    scanWifiProc.running = true;
+                                }
+                            }
+                        }
+                        Rectangle {
+                            visible: tab3.stageMode === 2 && tab3.btState !== "OFF"
+                            width: 62; height: 18; radius: 4; color: "#27272a"
+                            Text { anchors.centerIn: parent; text: tab3.btScanning ? "⏳ 探測中" : "🔍 掃描"; color: themeContext.geminiPurple; font.pixelSize: 9 }
+                            MouseArea {
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    tab3.btScanning = true;
+                                    startScanBtProc.running = false;
+                                    startScanBtProc.running = true;
                                 }
                             }
                         }
@@ -275,6 +288,52 @@ Item {
                             width: 56; height: 18; radius: 4; color: "#27272a"
                             Text { anchors.centerIn: parent; text: "返回預設"; color: "#e4e4e7"; font.pixelSize: 9 }
                             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: tab3.stageMode = 0 }
+                        }
+                    }
+                }
+
+                // 藍牙設備請求授權卡片 (原版 CornerBottomLeft 保留)
+                Rectangle {
+                    visible: tab3.hasPairRequest
+                    width: parent.width; height: 52; radius: 8
+                    color: "#2e1065"; border.width: 1; border.color: themeContext.geminiPurple
+                    Row {
+                        anchors.fill: parent; anchors.margins: 8; spacing: 8
+                        Column {
+                            width: parent.width - 120; anchors.verticalCenter: parent.verticalCenter; spacing: 2
+                            Text {
+                                text: "📱 收到配對請求 (" + tab3.pairReqMac.slice(0, 8) + ")"
+                                color: "#ffffff"; font.pixelSize: 10; font.bold: true
+                            }
+                            Text {
+                                text: "密鑰: " + tab3.pairReqPasskey
+                                color: themeContext.geminiGold; font.family: "monospace"; font.pixelSize: 10; font.bold: true
+                            }
+                        }
+                        Row {
+                            spacing: 6; anchors.verticalCenter: parent.verticalCenter
+                            Rectangle {
+                                width: 50; height: 24; radius: 5; color: "#166534"
+                                Text { anchors.centerIn: parent; text: "同意"; color: "#86efac"; font.pixelSize: 9; font.bold: true }
+                                MouseArea {
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        cmdRunner.run("echo 'yes' > /tmp/bt_ctl_fifo; bluetoothctl trust " + tab3.pairReqMac + "; rm -f /tmp/bt_pair_request");
+                                        tab3.hasPairRequest = false;
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                width: 50; height: 24; radius: 5; color: "#7f1d1d"
+                                Text { anchors.centerIn: parent; text: "拒絕"; color: "#fca5a5"; font.pixelSize: 9; font.bold: true }
+                                MouseArea {
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        cmdRunner.run("echo 'no' > /tmp/bt_ctl_fifo; rm -f /tmp/bt_pair_request");
+                                        tab3.hasPairRequest = false;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -435,49 +494,55 @@ Item {
 
                     Row {
                         visible: tab3.wifiScanning
-                        anchors.centerIn: parent; spacing: 6
-                        Text { text: "⏳"; font.pixelSize: 10 }
+                        anchors.centerIn: parent; spacing: 8
+                        Text { text: "⏳"; font.pixelSize: 12 }
                         Text { text: "正在雷達掃描周邊 Wi-Fi..."; color: themeContext.geminiGold; font.pixelSize: 10; font.bold: true }
                     }
 
                     Item {
-                        visible: !tab3.wifiScanning && tab3.wifiList.length === 0
+                        visible: !tab3.wifiScanning && wifiListModel.count === 0
                         anchors.fill: parent
                         Row {
-                            anchors.centerIn: parent; spacing: 6
-                            Text { text: "📡"; font.pixelSize: 10 }
+                            anchors.centerIn: parent; spacing: 8
+                            Text { text: "📡"; font.pixelSize: 12 }
                             Text { text: "未發現可用熱點 (點擊重新探測)"; color: "#71717a"; font.pixelSize: 10 }
                         }
                         MouseArea {
                             anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 tab3.wifiScanning = true;
-                                wifiScanProc.forceRescan = true;
-                                wifiScanProc.running = true;
+                                scanWifiProc.running = false;
+                                scanWifiProc.running = true;
                             }
                         }
                     }
 
-                    ListView {
-                        visible: !tab3.wifiScanning && tab3.wifiList.length > 0
-                        anchors.fill: parent; anchors.margins: 6; spacing: 2; clip: true
-                        model: tab3.wifiList
-                        delegate: Rectangle {
-                            required property var modelData
-                            width: ListView.view.width; height: 20; radius: 4
-                            color: modelData.inUse ? "#1e1b4b" : "transparent"
-                            Row {
-                                anchors.fill: parent; anchors.leftMargin: 6; anchors.rightMargin: 6; spacing: 6
-                                Text { text: "📶"; font.pixelSize: 9; anchors.verticalCenter: parent.verticalCenter }
-                                Text { text: modelData.ssid; color: modelData.inUse ? themeContext.geminiGold : "#ffffff"; font.pixelSize: 9; font.bold: modelData.inUse; width: 220; elide: Text.ElideRight; anchors.verticalCenter: parent.verticalCenter }
-                                Text { text: modelData.security !== "" ? "🔒" : ""; font.pixelSize: 8; anchors.verticalCenter: parent.verticalCenter }
-                                Text { text: modelData.signal + "%"; color: "#71717a"; font.family: "monospace"; font.pixelSize: 8; anchors.verticalCenter: parent.verticalCenter }
-                            }
-                            MouseArea {
-                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    wifiConnectProc.connectTo(modelData.ssid);
-                                    tab3.stageMode = 0;
+                    Column {
+                        visible: !tab3.wifiScanning && wifiListModel.count > 0
+                        anchors.fill: parent; anchors.margins: 4; spacing: 2
+                        Repeater {
+                            model: wifiListModel
+                            delegate: Rectangle {
+                                width: parent.width; height: 18; radius: 3
+                                color: model.inUse ? "#1e1b4b" : (wifiItemArea.containsMouse ? "#27272a" : "transparent")
+                                Row {
+                                    anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 6; spacing: 6
+                                    Text { text: "📶"; font.pixelSize: 8 }
+                                    Text {
+                                        text: model.ssid
+                                        color: model.inUse ? themeContext.geminiGold : "#ffffff"
+                                        font.pixelSize: 9; font.bold: model.inUse; elide: Text.ElideRight; width: 240
+                                    }
+                                    Text { text: model.security ? "🔒" : ""; font.pixelSize: 8 }
+                                    Text { text: model.signal + "%"; color: "#71717a"; font.pixelSize: 8; font.family: "monospace" }
+                                }
+                                MouseArea {
+                                    id: wifiItemArea
+                                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        cmdRunner.run("nmcli connection up '" + model.ssid + "' 2>/dev/null || nmcli dev wifi connect '" + model.ssid + "'");
+                                        tab3.stageMode = 0;
+                                    }
                                 }
                             }
                         }
@@ -487,178 +552,167 @@ Item {
                 // Stage 2: 藍牙樞紐 (原版左下角完整行為)
                 Rectangle {
                     visible: tab3.stageMode === 2
-                    width: parent.width; height: 96; radius: 8; color: "#18181b"; border.color: themeContext.geminiPurple; border.width: 1; clip: true
+                    width: parent.width; height: 112; radius: 8; color: "#18181b"; border.color: themeContext.geminiPurple; border.width: 1; clip: true
                     Column {
-                        anchors.fill: parent; anchors.margins: 6; spacing: 5
-                        Row {
-                            anchors.horizontalCenter: parent.horizontalCenter; spacing: 12
-                            Item {
-                                width: btPwrRow.implicitWidth; height: 18
+                        anchors.fill: parent; anchors.margins: 6; spacing: 4
+                        Item {
+                            width: parent.width; height: 16
+                            Row {
+                                anchors.horizontalCenter: parent.horizontalCenter; spacing: 12
                                 Row {
-                                    id: btPwrRow; anchors.centerIn: parent; spacing: 4
-                                    Text { text: tab3.btState !== "OFF" ? "⚡" : "💤"; font.pixelSize: 9; anchors.verticalCenter: parent.verticalCenter }
+                                    spacing: 4
+                                    Text { text: (tab3.btState !== "OFF") ? "⚡" : "💤"; font.pixelSize: 9 }
                                     Text {
-                                        text: tab3.btState !== "OFF" ? "射頻開" : "射頻關"
-                                        color: tab3.btState !== "OFF" ? themeContext.geminiPurple : "#71717a"
-                                        font.pixelSize: 9; font.bold: true; anchors.verticalCenter: parent.verticalCenter
+                                        text: (tab3.btState !== "OFF") ? "射頻開" : "射頻關"
+                                        color: (tab3.btState !== "OFF") ? themeContext.geminiPurple : "#71717a"
+                                        font.pixelSize: 9; font.bold: true
                                     }
                                     Rectangle {
-                                        width: 24; height: 13; radius: 6.5; anchors.verticalCenter: parent.verticalCenter
-                                        color: tab3.btState !== "OFF" ? themeContext.geminiPurple : "#3f3f46"
+                                        width: 24; height: 13; radius: 6
+                                        color: (tab3.btState !== "OFF") ? themeContext.geminiPurple : "#3f3f46"
                                         Rectangle {
-                                            width: 9; height: 9; radius: 4.5; color: "#ffffff"; y: 2
-                                            x: tab3.btState !== "OFF" ? 13 : 2
+                                            width: 9; height: 9; radius: 4; color: "#ffffff"
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            x: (tab3.btState !== "OFF") ? (parent.width - width - 2) : 2
                                             Behavior on x { NumberAnimation { duration: 150 } }
                                         }
-                                    }
-                                }
-                                MouseArea {
-                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        var turnOn = (tab3.btState === "OFF");
-                                        if (turnOn) {
-                                            tab3.btState = "ON";
-                                            tab3.btName = "開啟中...";
-                                            btActionProc.exec("rfkill unblock bluetooth 2>/dev/null; sleep 0.25; bluetoothctl power on");
-                                        } else {
-                                            tab3.btState = "OFF";
-                                            tab3.btName = "已關閉";
-                                            tab3.btDiscoverable = false;
-                                            tab3.btPairable = false;
-                                            btActionProc.exec("bluetoothctl power off");
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                if (tab3.btState !== "OFF") {
+                                                    tab3.btState = "OFF";
+                                                    tab3.btName = "已關閉";
+                                                    tab3.btDiscoverable = false;
+                                                    tab3.btPairable = false;
+                                                    cmdRunner.run("bluetoothctl power off");
+                                                } else {
+                                                    tab3.btState = "ON";
+                                                    tab3.btName = "未連線";
+                                                    cmdRunner.run("bluetoothctl power on");
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            Item {
-                                visible: tab3.btState !== "OFF"
-                                width: btDiscRow.implicitWidth; height: 18
                                 Row {
-                                    id: btDiscRow; anchors.centerIn: parent; spacing: 3
-                                    Text { text: tab3.btDiscoverable ? "📡" : "🙈"; font.pixelSize: 9; anchors.verticalCenter: parent.verticalCenter }
+                                    spacing: 4
+                                    visible: tab3.btState !== "OFF"
+                                    Text { text: tab3.btDiscoverable ? "📡" : "🙈"; font.pixelSize: 9 }
                                     Text {
                                         text: tab3.btDiscoverable ? "廣播開" : "廣播隱"
                                         color: tab3.btDiscoverable ? themeContext.geminiCyan : "#71717a"
-                                        font.pixelSize: 9; font.bold: true; anchors.verticalCenter: parent.verticalCenter
+                                        font.pixelSize: 9; font.bold: true
+                                    }
+                                    Rectangle {
+                                        width: 24; height: 13; radius: 6
+                                        color: tab3.btDiscoverable ? themeContext.geminiCyan : "#3f3f46"
+                                        Rectangle {
+                                            width: 9; height: 9; radius: 4; color: "#ffffff"
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            x: tab3.btDiscoverable ? (parent.width - width - 2) : 2
+                                            Behavior on x { NumberAnimation { duration: 150 } }
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                tab3.btDiscoverable = !tab3.btDiscoverable;
+                                                cmdRunner.run(tab3.btDiscoverable ? "bluetoothctl discoverable on" : "bluetoothctl discoverable off");
+                                            }
+                                        }
                                     }
                                 }
-                                MouseArea {
-                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        var next = !tab3.btDiscoverable;
-                                        tab3.btDiscoverable = next;
-                                        btActionProc.exec("bluetoothctl discoverable " + (next ? "on" : "off"));
-                                    }
-                                }
-                            }
-                            Item {
-                                visible: tab3.btState !== "OFF"
-                                width: btPairRow.implicitWidth; height: 18
                                 Row {
-                                    id: btPairRow; anchors.centerIn: parent; spacing: 3
-                                    Text { text: tab3.btPairable ? "🤝" : "🔒"; font.pixelSize: 9; anchors.verticalCenter: parent.verticalCenter }
+                                    spacing: 4
+                                    visible: tab3.btState !== "OFF"
+                                    Text { text: tab3.btPairable ? "🤝" : "🔒"; font.pixelSize: 9 }
                                     Text {
                                         text: tab3.btPairable ? "配對允" : "配對拒"
                                         color: tab3.btPairable ? themeContext.geminiGold : "#71717a"
-                                        font.pixelSize: 9; font.bold: true; anchors.verticalCenter: parent.verticalCenter
+                                        font.pixelSize: 9; font.bold: true
                                     }
-                                }
-                                MouseArea {
-                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        var next = !tab3.btPairable;
-                                        tab3.btPairable = next;
-                                        if (next) tab3.btDiscoverable = true;
-                                        btActionProc.exec(next
-                                            ? "bluetoothctl discoverable on; bluetoothctl pairable on"
-                                            : "bluetoothctl pairable off");
+                                    Rectangle {
+                                        width: 24; height: 13; radius: 6
+                                        color: tab3.btPairable ? themeContext.geminiGold : "#3f3f46"
+                                        Rectangle {
+                                            width: 9; height: 9; radius: 4; color: "#ffffff"
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            x: tab3.btPairable ? (parent.width - width - 2) : 2
+                                            Behavior on x { NumberAnimation { duration: 150 } }
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                tab3.btPairable = !tab3.btPairable;
+                                                if (tab3.btPairable) {
+                                                    tab3.btDiscoverable = true;
+                                                    cmdRunner.run("pgrep -f bt_agent.sh >/dev/null || nohup ~/.config/quickshell/bt_agent.sh >/dev/null 2>&1 &");
+                                                } else {
+                                                    cmdRunner.run("pkill -f bt_agent.sh; rm -f /tmp/bt_ctl_fifo; bluetoothctl discoverable off; bluetoothctl pairable off");
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        Rectangle { width: parent.width; height: 1; color: "#27272a" }
+                        Rectangle { width: parent.width - 12; height: 1; color: "#27272a"; anchors.horizontalCenter: parent.horizontalCenter }
 
                         Item {
-                            width: parent.width; height: parent.height - 26
-
+                            width: parent.width; height: parent.height - 24; clip: true
                             Text {
-                                visible: tab3.btState === "OFF"
                                 anchors.centerIn: parent
+                                visible: tab3.btState === "OFF"
                                 text: "💤 藍牙硬件已休眠，開啟射頻後方可探測"
                                 color: "#71717a"; font.pixelSize: 9
                             }
-
                             Column {
-                                visible: tab3.btState !== "OFF" && tab3.btDeviceList.length === 0
-                                anchors.centerIn: parent; spacing: 4
+                                anchors.centerIn: parent; spacing: 3
+                                visible: tab3.btState !== "OFF" && btListModel.count === 0
                                 Text {
-                                    anchors.horizontalCenter: parent.horizontalCenter
                                     text: tab3.btScanning ? "📡 正在探測周邊設備..." : "🎧 暫無配對設備"
                                     color: tab3.btScanning ? themeContext.geminiCyan : "#a1a1aa"
-                                    font.pixelSize: 9
+                                    font.pixelSize: 9; anchors.horizontalCenter: parent.horizontalCenter
                                 }
                                 Rectangle {
+                                    width: 110; height: 20; radius: 10; color: "#27272a"; border.width: 1; border.color: themeContext.geminiPurple
                                     anchors.horizontalCenter: parent.horizontalCenter
-                                    width: 88; height: 20; radius: 10; color: "#27272a"; border.color: themeContext.geminiPurple; border.width: 1
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: tab3.btScanning ? "⏳ 探測中..." : "🔍 掃描新設備"
-                                        color: "#f3e8ff"; font.pixelSize: 8; font.bold: true
+                                    Row {
+                                        anchors.centerIn: parent; spacing: 4
+                                        Text { text: tab3.btScanning ? "⏳" : "🔍"; font.pixelSize: 8 }
+                                        Text { text: tab3.btScanning ? "探測中..." : "掃描新設備"; color: "#f3e8ff"; font.pixelSize: 8; font.bold: true }
                                     }
                                     MouseArea {
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                         onClicked: {
                                             tab3.btScanning = true;
-                                            btScanProc.running = true;
+                                            startScanBtProc.running = false;
+                                            startScanBtProc.running = true;
                                         }
                                     }
                                 }
                             }
-
-                            ListView {
-                                visible: tab3.btState !== "OFF" && tab3.btDeviceList.length > 0
-                                anchors.fill: parent; clip: true; spacing: 2
-                                model: tab3.btDeviceList
-                                footer: Rectangle {
-                                    width: ListView.view.width; height: 20; radius: 4; color: "transparent"
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: tab3.btScanning ? "⏳ 正在探測周邊設備..." : "🔍 掃描更多新設備"
-                                        color: tab3.btScanning ? themeContext.geminiCyan : themeContext.geminiPurple
-                                        font.pixelSize: 8; font.bold: true
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            tab3.btScanning = true;
-                                            btScanProc.running = true;
-                                        }
-                                    }
-                                }
-                                delegate: Rectangle {
-                                    required property var modelData
-                                    readonly property bool isConn: tab3.btState === "CONN" && tab3.btName === modelData.name
-                                    width: ListView.view.width; height: 20; radius: 4
-                                    color: isConn ? "#2e1065" : "transparent"
-                                    Row {
-                                        anchors.fill: parent; anchors.leftMargin: 6; spacing: 6
-                                        Text { text: isConn ? "🔊" : "🎧"; font.pixelSize: 9; anchors.verticalCenter: parent.verticalCenter }
-                                        Text {
-                                            text: modelData.name
-                                            color: isConn ? themeContext.geminiCyan : "#ffffff"
-                                            font.pixelSize: 9; font.bold: true; anchors.verticalCenter: parent.verticalCenter
-                                        }
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            if (isConn) {
-                                                btActionProc.exec("bluetoothctl disconnect " + modelData.mac);
-                                            } else {
-                                                btActionProc.exec("bluetoothctl connect " + modelData.mac);
+                            Column {
+                                anchors.fill: parent; spacing: 2
+                                visible: tab3.btState !== "OFF" && btListModel.count > 0
+                                Repeater {
+                                    model: btListModel
+                                    delegate: Rectangle {
+                                        width: parent.width - 12; height: 20; radius: 3; anchors.horizontalCenter: parent.horizontalCenter
+                                        color: (tab3.btName === model.name) ? "#2e1065" : (btItemArea.containsMouse ? "#27272a" : "transparent")
+                                        Row {
+                                            anchors.verticalCenter: parent.verticalCenter; anchors.left: parent.left; anchors.leftMargin: 6; spacing: 6
+                                            Text { text: "🎧"; font.pixelSize: 8 }
+                                            Text {
+                                                text: model.name
+                                                color: (tab3.btName === model.name) ? themeContext.geminiCyan : "#ffffff"
+                                                font.pixelSize: 9; font.bold: true; elide: Text.ElideRight; width: 240
                                             }
-                                            tab3.stageMode = 0;
+                                        }
+                                        MouseArea {
+                                            id: btItemArea
+                                            anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                            onClicked: tab3.connectBt(model.mac)
                                         }
                                     }
                                 }
@@ -667,28 +721,33 @@ Item {
                     }
                 }
 
-                // 通信雙子 (Wi-Fi & 藍牙)
+                // 通信雙子星 (Wi-Fi & 藍牙)
                 Row {
                     width: parent.width; spacing: 8
                     readonly property real halfW: (width - spacing) / 2
                     Rectangle {
                         width: parent.halfW; height: 34; radius: 8
-                        color: tab3.stageMode === 1 ? "#27272a" : "#18181b"
-                        border.color: tab3.stageMode === 1 ? themeContext.geminiGold : "#27272a"; border.width: 1
+                        color: (tab3.stageMode === 1) ? "#27272a" : "#18181b"
+                        border.width: 1; border.color: (tab3.stageMode === 1) ? themeContext.geminiGold : "#27272a"
                         Row {
                             anchors.centerIn: parent; spacing: 6
                             Text { text: "📶"; font.pixelSize: 11 }
-                            Text { text: rootContext ? rootContext.currentWifi : "未連接"; color: (rootContext && rootContext.currentWifi !== "未連接") ? "#f4f4f5" : "#71717a"; font.pixelSize: 10; font.bold: true; elide: Text.ElideRight; width: 120 }
+                            Text {
+                                text: rootContext ? rootContext.currentWifi : "未連接"
+                                color: (rootContext && rootContext.currentWifi !== "未連接") ? "#f4f4f5" : "#71717a"
+                                font.pixelSize: 10; font.bold: true; elide: Text.ElideRight; width: 120
+                            }
                         }
                         MouseArea {
                             anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (tab3.stageMode === 1) tab3.stageMode = 0;
-                                else {
+                                if (tab3.stageMode === 1) {
+                                    tab3.stageMode = 0;
+                                } else {
                                     tab3.stageMode = 1;
                                     tab3.wifiScanning = true;
-                                    wifiScanProc.forceRescan = false;
-                                    wifiScanProc.running = true;
+                                    scanWifiProc.running = false;
+                                    scanWifiProc.running = true;
                                 }
                             }
                         }
@@ -696,28 +755,32 @@ Item {
 
                     Rectangle {
                         width: parent.halfW; height: 34; radius: 8
-                        color: tab3.stageMode === 2 ? "#27272a" : "#18181b"
-                        border.color: tab3.stageMode === 2 ? themeContext.geminiPurple : "#27272a"; border.width: 1
+                        color: (tab3.stageMode === 2) ? "#27272a" : "#18181b"
+                        border.width: 1; border.color: (tab3.stageMode === 2) ? themeContext.geminiPurple : "#27272a"
                         Row {
                             anchors.centerIn: parent; spacing: 6
                             Text {
-                                text: tab3.btState === "CONN" ? "🎧" : "ᛒ"
-                                color: tab3.btState === "CONN" ? themeContext.geminiCyan : (tab3.btState === "ON" ? "#e4e4e7" : "#71717a")
+                                text: (tab3.btState === "CONN") ? "🎧" : "ᛒ"
                                 font.pixelSize: 11
+                                color: (tab3.btState === "CONN") ? themeContext.geminiCyan : ((tab3.btState === "ON") ? "#e4e4e7" : "#71717a")
                             }
                             Text {
                                 text: tab3.btName
-                                color: tab3.btState === "CONN" ? "#ffffff" : (tab3.btState === "ON" ? "#e4e4e7" : "#71717a")
+                                color: (tab3.btState === "CONN") ? "#ffffff" : ((tab3.btState === "ON") ? "#e4e4e7" : "#71717a")
                                 font.pixelSize: 10; font.bold: true; elide: Text.ElideRight; width: 120
                             }
                         }
                         MouseArea {
                             anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                tab3.stageMode = (tab3.stageMode === 2 ? 0 : 2);
                                 if (tab3.stageMode === 2) {
+                                    tab3.stageMode = 0;
+                                } else {
+                                    tab3.stageMode = 2;
+                                    scanBtProc.running = false;
+                                    scanBtProc.running = true;
+                                    btStatusProc.running = false;
                                     btStatusProc.running = true;
-                                    btDevicesProc.running = true;
                                 }
                             }
                         }
