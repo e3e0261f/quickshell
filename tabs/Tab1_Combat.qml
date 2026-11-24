@@ -369,11 +369,11 @@ Column {
         Column {
             anchors.fill: parent; anchors.margins: 10; spacing: 6
             Item {
-                width: parent.width; height: 22
+                width: parent.width; height: 24
                 Row {
                     anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; spacing: 8
                     Text {
-                        text: "🖱️ 最近鼠標點擊坐標 (點擊複製 · 到任意打擊點貼上)"
+                        text: "🖱️ 鼠標點擊坐標記錄 (點擊複製 · 到任意打擊點貼上)"
                         color: themeContext ? themeContext.geminiCyan : "#38bdf8"
                         font.pixelSize: 9; font.bold: true
                     }
@@ -389,20 +389,68 @@ Column {
                     }
                 }
 
-                Rectangle {
-                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    width: 112; height: 22; radius: 11
-                    color: "#1e1b4b"; border.color: themeContext.geminiCyan; border.width: 1
-                    Text { anchors.centerIn: parent; text: "🎯 記錄光標坐標"; color: "#7dd3fc"; font.pixelSize: 9; font.bold: true }
-                    MouseArea {
-                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                        onClicked: if (rootContext) rootContext.pickCurrentCursorCoord()
+                Row {
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 8
+
+                    // 全局錄製開關 (默認關閉，省電零開銷)
+                    Row {
+                        anchors.verticalCenter: parent.verticalCenter; spacing: 5
+                        Text {
+                            text: (rootContext && rootContext.clickRecordEnabled) ? "● 全局錄製中" : "○ 全局錄製關"
+                            color: (rootContext && rootContext.clickRecordEnabled) ? "#4ade80" : "#71717a"
+                            font.pixelSize: 9; font.bold: true; anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Rectangle {
+                            width: 34; height: 18; radius: 9; anchors.verticalCenter: parent.verticalCenter
+                            color: (rootContext && rootContext.clickRecordEnabled) ? "#22c55e" : "#3f3f46"
+                            Rectangle {
+                                width: 14; height: 14; radius: 7; color: "#ffffff"; y: 2
+                                x: (rootContext && rootContext.clickRecordEnabled) ? 18 : 2
+                                Behavior on x { NumberAnimation { duration: 150 } }
+                            }
+                            MouseArea {
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: if (rootContext) rootContext.clickRecordEnabled = !rootContext.clickRecordEnabled
+                            }
+                        }
+                    }
+
+                    // 全屏取點一次
+                    Rectangle {
+                        width: 86; height: 22; radius: 11
+                        color: "#1e1b4b"; border.color: themeContext.geminiCyan; border.width: 1
+                        Text { anchors.centerIn: parent; text: "🎯 全屏取點"; color: "#7dd3fc"; font.pixelSize: 9; font.bold: true }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: if (rootContext) rootContext.screenPickerActive = true
+                        }
+                    }
+
+                    // 清空記錄
+                    Rectangle {
+                        visible: rootContext && rootContext.recentClicks && rootContext.recentClicks.length > 0
+                        width: 46; height: 22; radius: 11
+                        color: "#27272a"; border.color: "#3f3f46"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "🗑 清空"; color: "#a1a1aa"; font.pixelSize: 8; font.bold: true }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: if (rootContext) rootContext.clearRecentClicks()
+                        }
                     }
                 }
             }
 
-            ListView {
-                width: parent.width; height: parent.height - 28; clip: true; spacing: 4
+            Item {
+                width: parent.width; height: parent.height - 30
+                Text {
+                    visible: !rootContext || !rootContext.recentClicks || rootContext.recentClicks.length === 0
+                    anchors.centerIn: parent
+                    text: "暫無點擊記錄 — 打開「全局錄製」開關在全屏任意點擊，或點擊「🎯 全屏取點」單次抓取"
+                    color: "#71717a"; font.pixelSize: 9
+                }
+                ListView {
+                    visible: rootContext && rootContext.recentClicks && rootContext.recentClicks.length > 0
+                    anchors.fill: parent; clip: true; spacing: 4
                 model: rootContext ? rootContext.recentClicks : []
                 delegate: Rectangle {
                     required property var modelData
@@ -445,6 +493,7 @@ Column {
                         onClicked: if (rootContext) rootContext.copyRecentClick(modelData)
                     }
                 }
+            }
             }
         }
     }

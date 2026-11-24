@@ -13,7 +13,7 @@ PanelWindow {
     required property var volControl
     required property var soundContext
 
-    visible: rootContext.inspectMode
+    visible: rootContext.inspectMode && !rootContext.screenPickerActive
 
     anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
@@ -254,7 +254,10 @@ PanelWindow {
                                 anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                 onClicked: {
                                     centerWin.activeTab = modelData.id;
-                                    if (modelData.id === 2) netTelemetryProc.running = true;
+                                    if (modelData.id === 2) {
+                                        netTelemetryProc.running = false;
+                                        netTelemetryProc.running = true;
+                                    }
                                 }
                             }
                         }

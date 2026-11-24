@@ -170,7 +170,10 @@ Column {
         Text { anchors.centerIn: parent; text: "🔄 重新探測鏈路"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true }
         MouseArea {
             anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-            onClicked: if (netTelemetryProc) netTelemetryProc.running = true
+            onClicked: if (netTelemetryProc) {
+                netTelemetryProc.running = false;
+                netTelemetryProc.running = true;
+            }
         }
     }
 }

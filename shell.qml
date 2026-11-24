@@ -55,7 +55,9 @@ ShellRoot {
     property int xTargetY: xPoints.length > 0 ? xPoints[0].y : 1085
     property string xButtonCode: xPoints.length > 0 ? xPoints[0].btn : "0xC1"
 
-    // 最近鼠標點擊坐標列表 & 已複製坐標緩存
+    // 最近鼠標點擊坐標列表 & 已複製坐標緩存 (默認關閉全局錄製開關以節省性能)
+    property bool clickRecordEnabled: false
+    property bool screenPickerActive: false
     property var recentClicks: [
         { "time": "03:03:40", "x": 880, "y": 988, "btn": "0xC2", "source": "預設 Alt+Z 打擊點" },
         { "time": "03:03:42", "x": 1200, "y": 1085, "btn": "0xC1", "source": "預設 Alt+X 打擊點" }
@@ -291,8 +293,14 @@ ShellRoot {
         soundPlayer.play(theme.soundAlarm);
     }
 
-    function pickCurrentCursorCoord() {
+    function pickCurrentCursorCoord(btnCode) {
+        pickCoordProc.pendingBtn = btnCode || "0xC0";
+        pickCoordProc.running = false;
         pickCoordProc.running = true;
+    }
+
+    function clearRecentClicks() {
+        root.recentClicks = [];
     }
 
     // ========================================================
@@ -623,19 +631,125 @@ ShellRoot {
         }
     }
 
+    onClickRecordEnabledChanged: {
+        appendCombatLog("RECORDER", "全局鼠標坐標錄製開關 -> " + (clickRecordEnabled ? "ON (全屏點擊監聽中)" : "OFF (已停止，0性能開銷)"));
+    }
+
     Process {
-        id: pickCoordProc
-        command: ["sh", "-c", "CUR=$(hyprctl cursorpos); echo \"$CUR\""]
+        id: clickRecorderProc
+        running: root.clickRecordEnabled
+        command: [
+            "python3", "-u", "-c",
+            "import os, glob, fcntl, struct, selectors, subprocess, json\n" +
+            "EVIOCGNAME = 0x81004506\n" +
+            "EVIOCGBIT0 = 0x80084520\n" +
+            "EVIOCGBIT1 = 0x80604521\n" +
+            "BTN_MAP = {0x110: '0xC0', 0x111: '0xC1', 0x112: '0xC2'}\n" +
+            "sel = selectors.DefaultSelector()\n" +
+            "opened = []\n" +
+            "for p in sorted(glob.glob('/dev/input/event*')):\n" +
+            "    try:\n" +
+            "        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)\n" +
+            "        name_b = bytearray(256)\n" +
+            "        try:\n" +
+            "            fcntl.ioctl(fd, EVIOCGNAME, name_b, True)\n" +
+            "            nm = name_b.split(b'\\x00', 1)[0].decode('utf-8', 'ignore').lower()\n" +
+            "        except Exception:\n" +
+            "            nm = ''\n" +
+            "        if any(k in nm for k in ('ydotool', 'albion', 'uinput')):\n" +
+            "            os.close(fd); continue\n" +
+            "        b0 = bytearray(8)\n" +
+            "        fcntl.ioctl(fd, EVIOCGBIT0, b0, True)\n" +
+            "        if not (b0[0] & 0x02):\n" +
+            "            os.close(fd); continue\n" +
+            "        b1 = bytearray(96)\n" +
+            "        fcntl.ioctl(fd, EVIOCGBIT1, b1, True)\n" +
+            "        if (b1[34] & 0x01):\n" +
+            "            sel.register(fd, selectors.EVENT_READ)\n" +
+            "            opened.append(fd)\n" +
+            "        else:\n" +
+            "            os.close(fd)\n" +
+            "    except Exception:\n" +
+            "        pass\n" +
+            "if not opened:\n" +
+            "    print('ERR|no_evdev_permission', flush=True)\n" +
+            "else:\n" +
+            "    EV_FMT = '@llHHi'\n" +
+            "    EV_SZ = struct.calcsize(EV_FMT)\n" +
+            "    while True:\n" +
+            "        for key, _ in sel.select():\n" +
+            "            try:\n" +
+            "                data = os.read(key.fd, EV_SZ * 16)\n" +
+            "            except BlockingIOError:\n" +
+            "                continue\n" +
+            "            for off in range(0, len(data) - EV_SZ + 1, EV_SZ):\n" +
+            "                _, _, typ, code, val = struct.unpack_from(EV_FMT, data, off)\n" +
+            "                if typ == 1 and val == 1 and code in BTN_MAP:\n" +
+            "                    try:\n" +
+            "                        pos = subprocess.check_output(['hyprctl', 'cursorpos'], text=True).strip().split(',')\n" +
+            "                        px = int(pos[0].strip()); py = int(pos[1].strip())\n" +
+            "                    except Exception:\n" +
+            "                        px, py = 0, 0\n" +
+            "                    cls, title, addr = 'Desktop', '', '0x0'\n" +
+            "                    try:\n" +
+            "                        w = json.loads(subprocess.check_output(['hyprctl', 'activewindow', '-j'], text=True))\n" +
+            "                        cls = w.get('class') or 'Desktop'\n" +
+            "                        title = (w.get('title') or '').replace('|', ' ')[:48]\n" +
+            "                        addr = w.get('address') or '0x0'\n" +
+            "                    except Exception:\n" +
+            "                        pass\n" +
+            "                    print(f'{px}|{py}|{BTN_MAP[code]}|{cls}|{title}|{addr}', flush=True)\n"
+        ]
         stdout: SplitParser {
             onRead: function(line) {
-                var parts = String(line).trim().split(",");
+                var s = String(line).trim();
+                if (!s) return;
+                var parts = s.split("|");
+                if (parts[0] === "ERR") {
+                    root.appendCombatLog("RECORDER-ERR", "無法讀取 /dev/input/event*，請改用「🎯 全屏取點」或確認用戶在 input 組");
+                    root.clickRecordEnabled = false;
+                    return;
+                }
+                if (parts.length >= 4) {
+                    var px = parseInt(parts[0], 10) || 0;
+                    var py = parseInt(parts[1], 10) || 0;
+                    var btn = parts[2] || "0xC0";
+                    var cls = parts[3] || "Desktop";
+                    var title = parts[4] || "";
+                    var addr = parts[5] || "0x0";
+                    root.recordRecentClick(px, py, btn, cls);
+                    if (centerInspect) {
+                        centerInspect.pushHandleHistory("CLICK", cls, title, addr, px, py);
+                    }
+                }
+            }
+        }
+        stderr: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("RECORDER-ERR", s);
+            }
+        }
+    }
+
+    Process {
+        id: pickCoordProc
+        property string pendingBtn: "0xC0"
+        command: ["sh", "-c", "CUR=$(hyprctl cursorpos 2>/dev/null); echo \"$CUR\""]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var parts = text.trim().split(",");
                 if (parts.length >= 2) {
                     var px = parseInt(parts[0].trim(), 10) || 0;
                     var py = parseInt(parts[1].trim(), 10) || 0;
-                    root.recordRecentClick(px, py, "0xC0", "光標拾取 (" + root.liveClass + ")");
-                    root.copiedCoord = { "x": px, "y": py, "btn": "0xC0" };
+                    var btn = pickCoordProc.pendingBtn || "0xC0";
+                    root.recordRecentClick(px, py, btn, "全屏取點 (" + root.liveClass + ")");
+                    root.copiedCoord = { "x": px, "y": py, "btn": btn };
                     clipboardWriter.copy(px + ", " + py);
                     soundPlayer.play(theme.soundClick);
+                    if (centerInspect) {
+                        centerInspect.pushHandleHistory("CLICK", root.liveClass, "全屏取點 (" + btn + ")", root.liveAddr, px, py);
+                    }
                 }
             }
         }
@@ -748,11 +862,13 @@ ShellRoot {
     }
 
     Timer {
-        interval: root.inspectMode ? 250 : 1200
+        interval: (root.inspectMode || root.screenPickerActive) ? 250 : 1200
         running: true; repeat: true
         onTriggered: {
-            if (!cursorTracker.running) cursorTracker.running = true;
-            if (!activeWinTracker.running) activeWinTracker.running = true;
+            if (root.inspectMode || root.screenPickerActive) {
+                if (!cursorTracker.running) cursorTracker.running = true;
+                if (!activeWinTracker.running) activeWinTracker.running = true;
+            }
             if (!volReader.running) volReader.running = true;
             if (!wifiProcess.running) wifiProcess.running = true;
             if (!imeProcess.running) imeProcess.running = true;
@@ -802,5 +918,87 @@ ShellRoot {
         clockContext: clockObj
         volControl: volWriter
         soundContext: soundPlayer
+    }
+
+    // 全屏坐標取點覆蓋層 (按需開啟，零駐留開銷)
+    PanelWindow {
+        id: screenPickerWin
+        visible: root.screenPickerActive
+        anchors { top: true; bottom: true; left: true; right: true }
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+        color: "#1a000000"
+
+        Item {
+            anchors.fill: parent
+            focus: root.screenPickerActive
+            Keys.onEscapePressed: root.screenPickerActive = false
+
+            // 十字準星線
+            Rectangle {
+                x: 0; y: pickerMouse.mouseY; width: parent.width; height: 1
+                color: "#6638bdf8"
+                visible: pickerMouse.containsMouse
+            }
+            Rectangle {
+                x: pickerMouse.mouseX; y: 0; width: 1; height: parent.height
+                color: "#6638bdf8"
+                visible: pickerMouse.containsMouse
+            }
+
+            // 跟隨光標實時坐標膠囊
+            Rectangle {
+                visible: pickerMouse.containsMouse
+                x: Math.min(parent.width - width - 12, pickerMouse.mouseX + 16)
+                y: Math.min(parent.height - height - 12, pickerMouse.mouseY + 16)
+                width: liveCoordTxt.implicitWidth + 16; height: 24; radius: 6
+                color: "#e618181b"; border.color: theme.geminiCyan; border.width: 1
+                Text {
+                    id: liveCoordTxt
+                    anchors.centerIn: parent
+                    text: "🎯 " + root.liveCursorPos
+                    color: theme.geminiGold; font.family: "monospace"; font.pixelSize: 11; font.bold: true
+                }
+            }
+
+            // 頂部提示與取消按鈕
+            Rectangle {
+                anchors.top: parent.top; anchors.topMargin: 18; anchors.horizontalCenter: parent.horizontalCenter
+                width: hintRow.implicitWidth + 24; height: 34; radius: 17
+                color: "#e618181b"; border.color: theme.geminiCyan; border.width: 1; z: 5
+                Row {
+                    id: hintRow
+                    anchors.centerIn: parent; spacing: 12
+                    Text {
+                        text: "🎯 全屏取點模式 — 在螢幕任意位置點擊即可記錄並複製坐標 (ESC 取消)"
+                        color: "#f4f4f5"; font.pixelSize: 11; font.bold: true; anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Rectangle {
+                        width: 54; height: 22; radius: 11; color: "#27272a"; border.color: "#52525b"; border.width: 1
+                        Text { anchors.centerIn: parent; text: "取消"; color: "#fda4af"; font.pixelSize: 10; font.bold: true }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: root.screenPickerActive = false
+                        }
+                    }
+                }
+            }
+
+            MouseArea {
+                id: pickerMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
+                cursorShape: Qt.CrossCursor
+                onClicked: function(mouse) {
+                    var btn = "0xC0";
+                    if (mouse.button === Qt.RightButton) btn = "0xC1";
+                    else if (mouse.button === Qt.MiddleButton) btn = "0xC2";
+                    root.pickCurrentCursorCoord(btn);
+                    root.screenPickerActive = false;
+                }
+            }
+        }
     }
 }

@@ -912,10 +912,24 @@ Item {
                             model: trayMenuOpener.children
                             Rectangle {
                                 required property var modelData
-                                width: parent.width; height: 22; radius: 4; color: mma.containsMouse ? "#27272a" : "transparent"
-                                Text { anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter; text: modelData.text || ""; color: "#f4f4f5"; font.pixelSize: 10 }
+                                width: parent.width; height: modelData.isSeparator ? 5 : 22; radius: 4
+                                color: (!modelData.isSeparator && mma.containsMouse) ? "#27272a" : "transparent"
+                                Rectangle {
+                                    visible: !!modelData.isSeparator
+                                    anchors.centerIn: parent; width: parent.width - 8; height: 1; color: "#27272a"
+                                }
+                                Text {
+                                    visible: !modelData.isSeparator
+                                    anchors.left: parent.left; anchors.leftMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width - 16; elide: Text.ElideRight
+                                    text: modelData.text || ""
+                                    color: (modelData.enabled !== false) ? "#f4f4f5" : "#52525b"
+                                    font.pixelSize: 10
+                                }
                                 MouseArea {
-                                    id: mma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                    id: mma
+                                    visible: !modelData.isSeparator && (modelData.enabled !== false)
+                                    anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                     onClicked: { modelData.triggered(); tab3.trayMenuVisible = false; }
                                 }
                             }
