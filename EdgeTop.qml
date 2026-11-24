@@ -16,10 +16,9 @@ Variants {
             rootContext.inspectMode || rootContext.boostGlow
         required property var modelData; screen: modelData
         anchors { top: true; left: true; right: true }
-        
-        // 核心修復：只要開啟巡天巨幕（inspectMode）或者點了 2x 按鈕，高度自動切換到 20px 放大模式
+
         implicitHeight: topWin.expandedMode ? 20 : themeContext.glowDepth
-        
+
         exclusionMode: ExclusionMode.Ignore
         mask: Region {}
         WlrLayershell.layer: WlrLayer.Overlay
@@ -80,8 +79,7 @@ Variants {
                 visible: inTop
                 anchors.top: parent.top
                 height: topContainer.height
-                
-                // 巡天模式或 2x 模式下，光束寬度自動采用 boostLength 放大
+
                 width: topWin.expandedMode ? themeContext.beamBoostLength : themeContext.beamBaseLength
 
                 x: {

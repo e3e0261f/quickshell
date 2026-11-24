@@ -125,7 +125,6 @@ Variants {
                 }
             }
 
-            // 右边绝对静止刻度
             Repeater {
                 model: 37
                 Rectangle {

@@ -32,7 +32,6 @@ QtObject {
     property color hourColor: "#ffffff"
     property color halfHourColor: "#fde047"
 
-    // 常態紅點直徑 (px) 與 巡檢巨大化直徑 (px)
     property int dotSize: 3
     property int inspectDotSize: 9
     property color dotColor: "#ef4444"
@@ -40,9 +39,9 @@ QtObject {
     // ========================================================
     // 叁、 時針流體水滴與【流光翻倍】開關
     // ========================================================
-    property bool boostGlowDefault: false     // 【時針效果翻倍開關】預設狀態
-    property string labelBoost: "⚡ 流光翻倍"   // 重新命名
-    property string labelAlarm: "📍 航标时钟"   // 重新命名
+    property bool boostGlowDefault: false
+    property string labelBoost: "⚡ 流光翻倍"
+    property string labelAlarm: "📍 航標時鐘"
 
     property int beamBaseLength: 320
     property int beamBoostLength: 580
@@ -55,7 +54,7 @@ QtObject {
     property real waveAmp2: 0.05
 
     // ========================================================
-    // 肆、 航標時鐘 (原航標鬧鐘)
+    // 肆、 航標時鐘
     // ========================================================
     property bool alarmEnabledDefault: true
     property int defaultAlarmHour: 7
@@ -74,7 +73,7 @@ QtObject {
     property string soundVolume: "-12.0"
 
     // ========================================================
-    // 陆、 色譜大觀
+    // 陸、 色譜大觀
     // ========================================================
     property color geminiCyan: "#38bdf8"
     property color geminiPurple: "#c084fc"
@@ -88,18 +87,10 @@ QtObject {
     property color geminiCoral: "#fb7185"
 
     // ========================================================
-    // 柒、 彈窗與中央檢視視界
+    // 柒、 中央巡天視界配置（默認放大尺寸）
     // ========================================================
     property color popupBg: "#cc141418"
-    property int cornerLockDuration: 450
-    property int cornerCloseDelay: 250
-    property int cornerAnimDuration: 140
-
-    property int popupBL_W: 320;  property int popupBL_H: 280
-    property int popupBR_W: 285;  property int popupBR_H: 245
-    property int popupTL_W: 260;  property int popupTL_H: 180
-
-    // 中央巡天視界尺寸
-    property int centerHudW: 380
-    property int centerHudH: 220
+    property bool defaultCardLarge: true
+    property int centerHudW: 1040
+    property int centerHudH: 720
 }

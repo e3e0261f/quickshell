@@ -1,1 +1,18 @@
-{"zx":118,"zy":1215,"zbtn":"0xC0","xx":1380,"xy":700,"xbtn":"0xC0","snap":true,"clickerBtn":"0xC1","caffeine":true,"sleepMinutes":10}
+{
+  "zx": 880,
+  "zy": 988,
+  "zbtn": "0xC2",
+  "xx": 1200,
+  "xy": 1085,
+  "xbtn": "0xC1",
+  "zPoints": [
+    { "x": 880, "y": 988, "btn": "0xC2" }
+  ],
+  "xPoints": [
+    { "x": 1200, "y": 1085, "btn": "0xC1" }
+  ],
+  "snap": true,
+  "clickerBtn": "0xC1",
+  "caffeine": false,
+  "sleepMinutes": 30
+}

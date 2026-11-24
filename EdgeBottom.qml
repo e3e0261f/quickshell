@@ -37,7 +37,6 @@ Variants {
                 }
             }
 
-            // 前後雙燈塔錨點
             Repeater {
                 model: [clockContext.prevAnchorMin, clockContext.nextAnchorMin]
                 Rectangle {
@@ -56,7 +55,6 @@ Variants {
                 }
             }
 
-            // 鬧鐘信標
             Rectangle {
                 readonly property bool hasAlarm: rootContext.alarmEnabled && (rootContext.alarmHour % 12 >= 4 && rootContext.alarmHour % 12 <= 7)
                 visible: hasAlarm
@@ -71,7 +69,6 @@ Variants {
                 }
             }
 
-            // 時針流體水滴
             Item {
                 id: bottomBeam
                 readonly property int totMin: clockContext.totalMinutes
@@ -126,9 +123,6 @@ Variants {
                 }
             }
 
-            // ========================================================
-            // 【底邊刻度矩陣】：巡天全開顯影 + 紅珀微星巨化 (唯一無重疊屬性)
-            // ========================================================
             Repeater {
                 model: 37
                 Rectangle {
@@ -146,10 +140,7 @@ Variants {
                     readonly property bool inEdge: (targetAbsMin >= 0 && targetAbsMin <= 240)
                     readonly property bool isSubMinute: (targetClockMin % 30 !== 0)
 
-                    // 唯一 visible 屬性：巡天模式下無條件全開！
                     visible: inEdge && isSubMinute && (rootContext.inspectMode || distRatio <= 0.85)
-
-                    // 唯一 opacity 屬性
                     opacity: rootContext.inspectMode ? 0.85 : Math.max(0.0, (1.0 - distRatio * 1.1) * 0.75)
 
                     width: (targetClockMin % 10 === 0) ? rootContext.tickM10_W : ((targetClockMin % 5 === 0) ? rootContext.tickM5_W : rootContext.tickM1_W)
@@ -158,7 +149,6 @@ Variants {
                     color: (deltaMin === 0) ? themeContext.dotColor : themeContext.tickColor
                     antialiasing: false
 
-                    // 紅珀尋標微星：巡天模式下直徑瞬間擴展至 9px 巨星！
                     Rectangle {
                         visible: index === 18
                         width: rootContext.inspectMode ? themeContext.inspectDotSize : themeContext.dotSize

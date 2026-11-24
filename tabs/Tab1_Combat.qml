@@ -1,249 +1,284 @@
 import QtQuick
+import QtQuick.Controls
 
 Column {
-    id: tab1Root
+    id: tab1
     property var rootContext
     property var themeContext
+    property var clockContext
+    property var centerWin
     property var scriptRunner
-
-    // 統一主題色安全讀取，避免 themeContext 為空時報 TypeError
-    readonly property color colGold:  (themeContext && themeContext.geminiGold  !== undefined) ? themeContext.geminiGold  : "#eab308"
-    readonly property color colCoral: (themeContext && themeContext.geminiCoral !== undefined) ? themeContext.geminiCoral : "#f97316"
-    readonly property color colBlue:  (themeContext && themeContext.geminiBlue  !== undefined) ? themeContext.geminiBlue  : "#38bdf8"
-    readonly property color colRose:  (themeContext && themeContext.geminiRose  !== undefined) ? themeContext.geminiRose  : "#fb7185"
-    readonly property color colCyan:  (themeContext && themeContext.geminiCyan  !== undefined) ? themeContext.geminiCyan  : "#22d3ee"
+    property var handleHistory
+    property var netTelemetryProc
+    property var volControl
+    property var soundContext
 
     width: parent ? parent.width : 580
-    spacing: 12
+    spacing: 10
+    padding: 16
 
-    // 步進按鈕組件
-    component StepButton: Rectangle {
-        id: stepBtn
-        property string symbol: "+"
-        property int direction: 1
+    function btnLabel(code) {
+        if (code === "0xC1") return "右鍵";
+        if (code === "0xC2") return "中鍵";
+        return "左鍵";
+    }
+
+    component StepBtn: Rectangle {
+        property string sym: "+"
+        property int dir: 1
         signal stepped(int delta)
-        signal finished()
 
-        width: 18
-        height: 18
-        radius: 4
-        color: mouseArea.pressed ? "#3f3f46" : "#27272a"
-
-        Text {
-            anchors.centerIn: parent
-            text: stepBtn.symbol
-            color: "#ffffff"
-            font.bold: true
-            font.pixelSize: 11
-        }
-
-        property int holdTicks: 0
-
-        Timer {
-            id: repeatTimer
-            interval: 70
-            repeat: true
-            onTriggered: {
-                stepBtn.holdTicks += 1
-                var mult = stepBtn.holdTicks > 32 ? 100 : (stepBtn.holdTicks > 12 ? 10 : (stepBtn.holdTicks > 4 ? 2 : 1))
-                stepBtn.stepped(stepBtn.direction * mult)
-            }
-        }
-
-        Timer {
-            id: initialDelayTimer
-            interval: 320
-            onTriggered: repeatTimer.start()
-        }
-
+        width: 18; height: 18; radius: 4
+        color: ma.pressed ? "#52525b" : (ma.containsMouse ? "#3f3f46" : "#27272a")
+        Text { anchors.centerIn: parent; text: sym; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
         MouseArea {
-            id: mouseArea
-            anchors.fill: parent
+            id: ma; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+            property int ticks: 0
+            Timer {
+                id: delayTimer; interval: 320; repeat: false
+                onTriggered: repeatTimer.start()
+            }
+            Timer {
+                id: repeatTimer; interval: 70; repeat: true
+                onTriggered: {
+                    ma.ticks += 1;
+                    var mult = ma.ticks > 32 ? 100 : (ma.ticks > 12 ? 10 : (ma.ticks > 4 ? 2 : 1));
+                    stepped(dir * mult);
+                }
+            }
             onPressed: {
-                // 先搶佔焦點，讓尚未確認的 TextInput 觸發 onEditingFinished 完成提交
-                stepBtn.forceActiveFocus()
-                stepBtn.stepped(stepBtn.direction * 1)
-                stepBtn.holdTicks = 0
-                initialDelayTimer.restart()
+                ticks = 0;
+                stepped(dir);
+                delayTimer.start();
             }
-            onReleased: {
-                initialDelayTimer.stop()
-                repeatTimer.stop()
-                stepBtn.finished()
-            }
-            onCanceled: {
-                initialDelayTimer.stop()
-                repeatTimer.stop()
-                stepBtn.finished()
-            }
+            onReleased: { delayTimer.stop(); repeatTimer.stop(); }
+            onCanceled: { delayTimer.stop(); repeatTimer.stop(); }
         }
     }
 
-    // 坐標輸入組件（自動恢復綁定，支援 Enter 確認與無效輸入回滾）
-    component CoordInput: TextInput {
-        id: coordInput
-        property int coordValue: 0
-        signal committed(int newValue)
+    component StrikeGroupPanel: Rectangle {
+        id: panel
+        property string groupKey: "Z"
+        property string titleText: "精確打擊 (Alt+Z)"
+        property color accent: "#38bdf8"
+        property var pointsModel: []
 
-        text: String(coordValue)
-        color: "#ffffff"
-        font.family: "JetBrains Mono"
-        font.pixelSize: 11
-        width: 38
-        horizontalAlignment: Text.AlignHCenter
-        selectByMouse: true
-        validator: IntValidator { bottom: 0; top: 9999 }
+        height: Math.min(248, 40 + (pointsModel ? pointsModel.length : 1) * 56)
+        radius: 10; color: "#18181b"; border.color: accent; border.width: 1; clip: true
 
-        Keys.onReturnPressed: focus = false
-        Keys.onEnterPressed: focus = false
+        Column {
+            anchors.fill: parent; anchors.margins: 10; spacing: 8
+            Item {
+                width: parent.width; height: 22
+                Row {
+                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; spacing: 6
+                    Text {
+                        text: panel.titleText
+                        color: panel.accent; font.pixelSize: 10; font.bold: true
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: if (rootContext) rootContext.executeStrikeSequence("Alt+" + panel.groupKey, panel.pointsModel)
+                        }
+                    }
+                    Rectangle {
+                        width: cntTxt.implicitWidth + 10; height: 16; radius: 4; color: "#27272a"
+                        Text {
+                            id: cntTxt; anchors.centerIn: parent
+                            text: (panel.pointsModel ? panel.pointsModel.length : 0) + " 點"
+                            color: "#e4e4e7"; font.family: "monospace"; font.pixelSize: 9
+                        }
+                    }
+                }
 
-        onEditingFinished: {
-            var v = parseInt(text, 10)
-            if (!isNaN(v)) {
-                v = Math.max(0, Math.min(9999, v))
-                committed(v)
+                Row {
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 4
+                    Rectangle {
+                        width: 20; height: 20; radius: 4
+                        color: "#27272a"
+                        opacity: (panel.pointsModel && panel.pointsModel.length <= 1) ? 0.4 : 1.0
+                        Text { anchors.centerIn: parent; text: "-"; color: "#ffffff"; font.pixelSize: 12; font.bold: true }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: if (rootContext) rootContext.removePoint(panel.groupKey, undefined)
+                        }
+                    }
+                    Rectangle {
+                        width: 20; height: 20; radius: 4; color: "#27272a"
+                        Text { anchors.centerIn: parent; text: "+"; color: "#ffffff"; font.pixelSize: 12; font.bold: true }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: if (rootContext) rootContext.addPoint(panel.groupKey)
+                        }
+                    }
+                }
             }
-            text = Qt.binding(function() { return String(coordInput.coordValue) })
+
+            ListView {
+                width: parent.width; height: parent.height - 30; clip: true; spacing: 6
+                model: panel.pointsModel
+                delegate: Rectangle {
+                    id: pointDelegate
+                    required property var modelData
+                    required property int index
+                    readonly property int ptIndex: index
+                    readonly property var ptData: modelData
+
+                    width: ListView.view.width; height: 50; radius: 8
+                    color: "#121216"; border.color: "#27272a"; border.width: 1
+
+                    Column {
+                        anchors.fill: parent; anchors.margins: 6; spacing: 5
+                        // 第一行：序號 + X/Y 坐標微調
+                        Row {
+                            width: parent.width; spacing: 4
+                            Rectangle {
+                                width: 24; height: 18; radius: 4; color: "#27272a"
+                                Text { anchors.centerIn: parent; text: "#" + (pointDelegate.ptIndex + 1); color: panel.accent; font.family: "monospace"; font.pixelSize: 9; font.bold: true }
+                            }
+                            Text { text: "X:"; color: "#a1a1aa"; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
+                            StepBtn {
+                                sym: "-"; dir: -1
+                                onStepped: function(d) { if (rootContext) rootContext.updatePoint(panel.groupKey, pointDelegate.ptIndex, pointDelegate.ptData.x + d, null, null) }
+                            }
+                            TextInput {
+                                width: 38; height: 18; verticalAlignment: TextInput.AlignVCenter; horizontalAlignment: TextInput.AlignHCenter
+                                text: String(pointDelegate.ptData.x); color: "#ffffff"; font.family: "monospace"; font.pixelSize: 11
+                                validator: IntValidator { bottom: 0; top: 9999 }
+                                onEditingFinished: if (rootContext) rootContext.updatePoint(panel.groupKey, pointDelegate.ptIndex, parseInt(text, 10) || 0, null, null)
+                            }
+                            StepBtn {
+                                sym: "+"; dir: 1
+                                onStepped: function(d) { if (rootContext) rootContext.updatePoint(panel.groupKey, pointDelegate.ptIndex, pointDelegate.ptData.x + d, null, null) }
+                            }
+                            Item { width: 4; height: 1 }
+                            Text { text: "Y:"; color: "#a1a1aa"; font.pixelSize: 10; anchors.verticalCenter: parent.verticalCenter }
+                            StepBtn {
+                                sym: "-"; dir: -1
+                                onStepped: function(d) { if (rootContext) rootContext.updatePoint(panel.groupKey, pointDelegate.ptIndex, null, pointDelegate.ptData.y + d, null) }
+                            }
+                            TextInput {
+                                width: 38; height: 18; verticalAlignment: TextInput.AlignVCenter; horizontalAlignment: TextInput.AlignHCenter
+                                text: String(pointDelegate.ptData.y); color: "#ffffff"; font.family: "monospace"; font.pixelSize: 11
+                                validator: IntValidator { bottom: 0; top: 9999 }
+                                onEditingFinished: if (rootContext) rootContext.updatePoint(panel.groupKey, pointDelegate.ptIndex, null, parseInt(text, 10) || 0, null)
+                            }
+                            StepBtn {
+                                sym: "+"; dir: 1
+                                onStepped: function(d) { if (rootContext) rootContext.updatePoint(panel.groupKey, pointDelegate.ptIndex, null, pointDelegate.ptData.y + d, null) }
+                            }
+                        }
+
+                        // 第二行：鼠標按鍵選擇 + 📋 貼上 + × 刪除
+                        Item {
+                            width: parent.width; height: 18
+                            Row {
+                                anchors.left: parent.left; spacing: 4
+                                Repeater {
+                                    model: [
+                                        { code: "0xC0", label: "左鍵" },
+                                        { code: "0xC1", label: "右鍵" },
+                                        { code: "0xC2", label: "中鍵" }
+                                    ]
+                                    Rectangle {
+                                        required property var modelData
+                                        readonly property bool active: modelData.code === pointDelegate.ptData.btn
+                                        width: 40; height: 17; radius: 9
+                                        color: active ? panel.accent : "#27272a"
+                                        Text { anchors.centerIn: parent; text: modelData.label; color: active ? "#ffffff" : "#a1a1aa"; font.pixelSize: 9; font.bold: true }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: if (rootContext) rootContext.updatePoint(panel.groupKey, pointDelegate.ptIndex, null, null, modelData.code)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Row {
+                                anchors.right: parent.right; spacing: 4
+                                Rectangle {
+                                    width: 56; height: 17; radius: 9
+                                    color: (rootContext && rootContext.copiedCoord) ? "#1e1b4b" : "#27272a"
+                                    border.color: (rootContext && rootContext.copiedCoord) ? themeContext.geminiCyan : "#3f3f46"; border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent; text: "📋 貼上"
+                                        color: (rootContext && rootContext.copiedCoord) ? themeContext.geminiCyan : "#a1a1aa"
+                                        font.pixelSize: 9; font.bold: true
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: if (rootContext) rootContext.pasteToPoint(panel.groupKey, pointDelegate.ptIndex)
+                                    }
+                                }
+                                Rectangle {
+                                    visible: panel.pointsModel.length > 1
+                                    width: 17; height: 17; radius: 9; color: "#27272a"
+                                    Text { anchors.centerIn: parent; text: "×"; color: "#fda4af"; font.pixelSize: 10; font.bold: true }
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: if (rootContext) rootContext.removePoint(panel.groupKey, pointDelegate.ptIndex)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
     Text {
-        text: "ALBION & COMBAT HUD (YDO-TOOL ENGINE)"
-        color: tab1Root.colGold
-        font.pixelSize: 10
-        font.bold: true
         anchors.horizontalCenter: parent.horizontalCenter
+        text: "ALBION & COMBAT HUD (YDO-TOOL ENGINE)"
+        color: themeContext ? themeContext.geminiGold : "#fde047"
+        font.pixelSize: 10; font.bold: true; font.letterSpacing: 1
     }
 
-    // 行 1：連點器與按鍵選擇 + Q鍵連發
+    // 第一行：鼠標連擊 + 按住 Q 鍵連發
     Row {
-        spacing: 14
-        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(920, parent.width - 32); anchors.horizontalCenter: parent.horizontalCenter; spacing: 12
+        readonly property real halfW: (width - spacing) / 2
 
         Rectangle {
-            width: 255
-            height: 74
-            radius: 10
+            width: parent.halfW; height: 70; radius: 10
             color: "#18181b"
-            border.width: 1
-            border.color: rootContext && rootContext.autoClickerEnabled ? tab1Root.colGold : "#27272a"
-
+            border.color: (rootContext && rootContext.autoClickerEnabled) ? themeContext.geminiGold : "#27272a"; border.width: 1
             Column {
-                anchors.centerIn: parent
-                spacing: 6
-
-                Row {
-                    spacing: 12
+                anchors.centerIn: parent; width: parent.width - 24; spacing: 6
+                Item {
+                    width: parent.width; height: 28
                     Column {
-                        spacing: 2
-                        Text {
-                            text: "鼠標連擊 (左+右鍵)"
-                            color: "#ffffff"
-                            font.pixelSize: 11
-                            font.bold: true
-                        }
-                        Text {
-                            text: "12 次/秒 · 點擊開關"
-                            color: "#71717a"
-                            font.pixelSize: 9
-                        }
+                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                        Text { text: "鼠標連擊 (左+右鍵)"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text { text: "12 次/秒 · 點擊開關"; color: "#71717a"; font.pixelSize: 9 }
                     }
                     Rectangle {
-                        width: 38
-                        height: 22
-                        radius: 11
-                        color: rootContext && rootContext.autoClickerEnabled ? tab1Root.colGold : "#3f3f46"
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        width: 38; height: 22; radius: 11
+                        color: (rootContext && rootContext.autoClickerEnabled) ? themeContext.geminiGold : "#3f3f46"
                         Rectangle {
-                            width: 18
-                            height: 18
-                            radius: 9
-                            color: "#ffffff"
-                            anchors.verticalCenter: parent.verticalCenter
-                            x: rootContext && rootContext.autoClickerEnabled ? (parent.width - width - 2) : 2
+                            width: 18; height: 18; radius: 9; color: "#ffffff"; y: 2
+                            x: (rootContext && rootContext.autoClickerEnabled) ? 18 : 2
                             Behavior on x { NumberAnimation { duration: 150 } }
                         }
                         MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) rootContext.autoClickerEnabled = !rootContext.autoClickerEnabled
-                            }
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: if (rootContext) rootContext.autoClickerEnabled = !rootContext.autoClickerEnabled
                         }
                     }
                 }
-
                 Row {
-                    spacing: 6
-                    anchors.horizontalCenter: parent.horizontalCenter
-
-                    Rectangle {
-                        width: 50
-                        height: 18
-                        radius: 9
-                        color: rootContext && (rootContext.clickerButtonCode === "0xC0") ? tab1Root.colGold : "#27272a"
-                        Text {
-                            anchors.centerIn: parent
-                            text: "左鍵"
-                            font.pixelSize: 9
-                            font.bold: true
-                            color: rootContext && (rootContext.clickerButtonCode === "0xC0") ? "#18181b" : "#a1a1aa"
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) {
-                                    rootContext.clickerButtonCode = "0xC0"
-                                    rootContext.saveCoords()
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 50
-                        height: 18
-                        radius: 9
-                        color: rootContext && (rootContext.clickerButtonCode === "0xC1") ? tab1Root.colGold : "#27272a"
-                        Text {
-                            anchors.centerIn: parent
-                            text: "右鍵"
-                            font.pixelSize: 9
-                            font.bold: true
-                            color: rootContext && (rootContext.clickerButtonCode === "0xC1") ? "#18181b" : "#a1a1aa"
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) {
-                                    rootContext.clickerButtonCode = "0xC1"
-                                    rootContext.saveCoords()
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 50
-                        height: 18
-                        radius: 9
-                        color: rootContext && (rootContext.clickerButtonCode === "0xC2") ? tab1Root.colGold : "#27272a"
-                        Text {
-                            anchors.centerIn: parent
-                            text: "中鍵"
-                            font.pixelSize: 9
-                            font.bold: true
-                            color: rootContext && (rootContext.clickerButtonCode === "0xC2") ? "#18181b" : "#a1a1aa"
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) {
-                                    rootContext.clickerButtonCode = "0xC2"
-                                    rootContext.saveCoords()
-                                }
+                    anchors.horizontalCenter: parent.horizontalCenter; spacing: 6
+                    Repeater {
+                        model: [{ code: "0xC0", label: "左鍵" }, { code: "0xC1", label: "右鍵" }, { code: "0xC2", label: "中鍵" }]
+                        Rectangle {
+                            required property var modelData
+                            readonly property bool active: rootContext && rootContext.clickerButtonCode === modelData.code
+                            width: 50; height: 18; radius: 9
+                            color: active ? themeContext.geminiGold : "#27272a"
+                            Text { anchors.centerIn: parent; text: modelData.label; color: active ? "#18181b" : "#a1a1aa"; font.pixelSize: 9; font.bold: true }
+                            MouseArea {
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: if (rootContext) { rootContext.clickerButtonCode = modelData.code; rootContext.saveCoords(); }
                             }
                         }
                     }
@@ -252,548 +287,187 @@ Column {
         }
 
         Rectangle {
-            width: 255
-            height: 74
-            radius: 10
+            width: parent.halfW; height: 70; radius: 10
             color: "#18181b"
-            border.width: 1
-            border.color: rootContext && rootContext.autoQActive ? tab1Root.colCoral : "#27272a"
-
-            Row {
-                anchors.centerIn: parent
-                spacing: 14
-
+            border.color: (rootContext && rootContext.autoQActive) ? themeContext.geminiCoral : "#27272a"; border.width: 1
+            Item {
+                anchors.fill: parent; anchors.margins: 18
                 Column {
-                    spacing: 4
-                    Text {
-                        text: "按住 Q 鍵連發模式"
-                        color: "#ffffff"
-                        font.pixelSize: 11
-                        font.bold: true
-                    }
-                    Text {
-                        text: "按住Q無限發送，鬆手即停"
-                        color: "#71717a"
-                        font.pixelSize: 9
-                    }
+                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; spacing: 2
+                    Text { text: "按住 Q 鍵連發模式"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
+                    Text { text: "按住Q無限發送，鬆手即停"; color: "#71717a"; font.pixelSize: 9 }
                 }
                 Rectangle {
-                    width: 38
-                    height: 22
-                    radius: 11
-                    color: rootContext && rootContext.autoQActive ? tab1Root.colCoral : "#3f3f46"
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                    width: 38; height: 22; radius: 11
+                    color: (rootContext && rootContext.autoQActive) ? themeContext.geminiCoral : "#3f3f46"
                     Rectangle {
-                        width: 18
-                        height: 18
-                        radius: 9
-                        color: "#ffffff"
-                        anchors.verticalCenter: parent.verticalCenter
-                        x: rootContext && rootContext.autoQActive ? (parent.width - width - 2) : 2
+                        width: 18; height: 18; radius: 9; color: "#ffffff"; y: 2
+                        x: (rootContext && rootContext.autoQActive) ? 18 : 2
                         Behavior on x { NumberAnimation { duration: 150 } }
                     }
                     MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (rootContext) {
-                                rootContext.autoQActive = !rootContext.autoQActive
-                                if (scriptRunner) {
-                                    if (rootContext.autoQActive) scriptRunner.runScript("touch /tmp/q_spam_enabled")
-                                    else scriptRunner.runScript("rm -f /tmp/q_spam_enabled")
-                                }
-                            }
-                        }
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: if (rootContext) rootContext.autoQActive = !rootContext.autoQActive
                     }
                 }
             }
         }
     }
 
-    // 行 2：打擊坐標調整與三鍵自選（註：後端屬性仍沿用 shiftZ*/shiftX* 命名以保持相容）
+    // 第二行：多點 Alt+Z & Alt+X 精確打擊
     Row {
-        spacing: 14
-        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(920, parent.width - 32); anchors.horizontalCenter: parent.horizontalCenter; spacing: 12
+        readonly property real halfW: (width - spacing) / 2
 
-        // Alt+Z 面板
-        Rectangle {
-            width: 255
-            height: 86
-            radius: 10
-            color: "#18181b"
-            border.width: 1
-            border.color: tab1Root.colBlue
-
-            Column {
-                anchors.centerIn: parent
-                spacing: 6
-
-                Text {
-                    text: "精確打擊 (Alt+Z)"
-                    color: tab1Root.colBlue
-                    font.pixelSize: 10
-                    font.bold: true
-                    anchors.horizontalCenter: parent.horizontalCenter
-                }
-
-                Row {
-                    spacing: 5
-                    anchors.horizontalCenter: parent.horizontalCenter
-
-                    Text {
-                        text: "X:"
-                        color: "#a1a1aa"
-                        font.pixelSize: 11
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    StepButton {
-                        symbol: "-"
-                        direction: -1
-                        onStepped: function(d) {
-                            if (rootContext) rootContext.shiftZx = Math.max(0, Math.min(9999, rootContext.shiftZx + d))
-                        }
-                        onFinished: function() {
-                            if (rootContext) rootContext.saveCoords()
-                        }
-                    }
-                    CoordInput {
-                        anchors.verticalCenter: parent.verticalCenter
-                        coordValue: rootContext ? rootContext.shiftZx : 500
-                        onCommitted: function(v) {
-                            if (rootContext) {
-                                rootContext.shiftZx = v
-                                rootContext.saveCoords()
-                            }
-                        }
-                    }
-                    StepButton {
-                        symbol: "+"
-                        direction: 1
-                        onStepped: function(d) {
-                            if (rootContext) rootContext.shiftZx = Math.max(0, Math.min(9999, rootContext.shiftZx + d))
-                        }
-                        onFinished: function() {
-                            if (rootContext) rootContext.saveCoords()
-                        }
-                    }
-
-                    Item { width: 4; height: 1 }
-
-                    Text {
-                        text: "Y:"
-                        color: "#a1a1aa"
-                        font.pixelSize: 11
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    StepButton {
-                        symbol: "-"
-                        direction: -1
-                        onStepped: function(d) {
-                            if (rootContext) rootContext.shiftZy = Math.max(0, Math.min(9999, rootContext.shiftZy + d))
-                        }
-                        onFinished: function() {
-                            if (rootContext) rootContext.saveCoords()
-                        }
-                    }
-                    CoordInput {
-                        anchors.verticalCenter: parent.verticalCenter
-                        coordValue: rootContext ? rootContext.shiftZy : 500
-                        onCommitted: function(v) {
-                            if (rootContext) {
-                                rootContext.shiftZy = v
-                                rootContext.saveCoords()
-                            }
-                        }
-                    }
-                    StepButton {
-                        symbol: "+"
-                        direction: 1
-                        onStepped: function(d) {
-                            if (rootContext) rootContext.shiftZy = Math.max(0, Math.min(9999, rootContext.shiftZy + d))
-                        }
-                        onFinished: function() {
-                            if (rootContext) rootContext.saveCoords()
-                        }
-                    }
-                }
-
-                Row {
-                    spacing: 6
-                    anchors.horizontalCenter: parent.horizontalCenter
-
-                    Rectangle {
-                        width: 50
-                        height: 18
-                        radius: 9
-                        color: rootContext && (rootContext.shiftZBtn === "0xC0") ? tab1Root.colBlue : "#27272a"
-                        Text {
-                            anchors.centerIn: parent
-                            text: "左鍵"
-                            font.pixelSize: 9
-                            font.bold: true
-                            color: rootContext && (rootContext.shiftZBtn === "0xC0") ? "#ffffff" : "#a1a1aa"
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) {
-                                    rootContext.shiftZBtn = "0xC0"
-                                    rootContext.saveCoords()
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 50
-                        height: 18
-                        radius: 9
-                        color: rootContext && (rootContext.shiftZBtn === "0xC1") ? tab1Root.colBlue : "#27272a"
-                        Text {
-                            anchors.centerIn: parent
-                            text: "右鍵"
-                            font.pixelSize: 9
-                            font.bold: true
-                            color: rootContext && (rootContext.shiftZBtn === "0xC1") ? "#ffffff" : "#a1a1aa"
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) {
-                                    rootContext.shiftZBtn = "0xC1"
-                                    rootContext.saveCoords()
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 50
-                        height: 18
-                        radius: 9
-                        color: rootContext && (rootContext.shiftZBtn === "0xC2") ? tab1Root.colBlue : "#27272a"
-                        Text {
-                            anchors.centerIn: parent
-                            text: "中鍵"
-                            font.pixelSize: 9
-                            font.bold: true
-                            color: rootContext && (rootContext.shiftZBtn === "0xC2") ? "#ffffff" : "#a1a1aa"
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) {
-                                    rootContext.shiftZBtn = "0xC2"
-                                    rootContext.saveCoords()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        StrikeGroupPanel {
+            width: parent.halfW
+            groupKey: "Z"
+            titleText: "精確打擊 (Alt+Z)"
+            accent: themeContext ? themeContext.geminiBlue : "#38bdf8"
+            pointsModel: rootContext ? rootContext.zPoints : []
         }
 
-        // Alt+X 面板
-        Rectangle {
-            width: 255
-            height: 86
-            radius: 10
-            color: "#18181b"
-            border.width: 1
-            border.color: tab1Root.colRose
-
-            Column {
-                anchors.centerIn: parent
-                spacing: 6
-
-                Text {
-                    text: "精確打擊 (Alt+X)"
-                    color: tab1Root.colRose
-                    font.pixelSize: 10
-                    font.bold: true
-                    anchors.horizontalCenter: parent.horizontalCenter
-                }
-
-                Row {
-                    spacing: 5
-                    anchors.horizontalCenter: parent.horizontalCenter
-
-                    Text {
-                        text: "X:"
-                        color: "#a1a1aa"
-                        font.pixelSize: 11
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    StepButton {
-                        symbol: "-"
-                        direction: -1
-                        onStepped: function(d) {
-                            if (rootContext) rootContext.shiftXx = Math.max(0, Math.min(9999, rootContext.shiftXx + d))
-                        }
-                        onFinished: function() {
-                            if (rootContext) rootContext.saveCoords()
-                        }
-                    }
-                    CoordInput {
-                        anchors.verticalCenter: parent.verticalCenter
-                        coordValue: rootContext ? rootContext.shiftXx : 800
-                        onCommitted: function(v) {
-                            if (rootContext) {
-                                rootContext.shiftXx = v
-                                rootContext.saveCoords()
-                            }
-                        }
-                    }
-                    StepButton {
-                        symbol: "+"
-                        direction: 1
-                        onStepped: function(d) {
-                            if (rootContext) rootContext.shiftXx = Math.max(0, Math.min(9999, rootContext.shiftXx + d))
-                        }
-                        onFinished: function() {
-                            if (rootContext) rootContext.saveCoords()
-                        }
-                    }
-
-                    Item { width: 4; height: 1 }
-
-                    Text {
-                        text: "Y:"
-                        color: "#a1a1aa"
-                        font.pixelSize: 11
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    StepButton {
-                        symbol: "-"
-                        direction: -1
-                        onStepped: function(d) {
-                            if (rootContext) rootContext.shiftXy = Math.max(0, Math.min(9999, rootContext.shiftXy + d))
-                        }
-                        onFinished: function() {
-                            if (rootContext) rootContext.saveCoords()
-                        }
-                    }
-                    CoordInput {
-                        anchors.verticalCenter: parent.verticalCenter
-                        coordValue: rootContext ? rootContext.shiftXy : 500
-                        onCommitted: function(v) {
-                            if (rootContext) {
-                                rootContext.shiftXy = v
-                                rootContext.saveCoords()
-                            }
-                        }
-                    }
-                    StepButton {
-                        symbol: "+"
-                        direction: 1
-                        onStepped: function(d) {
-                            if (rootContext) rootContext.shiftXy = Math.max(0, Math.min(9999, rootContext.shiftXy + d))
-                        }
-                        onFinished: function() {
-                            if (rootContext) rootContext.saveCoords()
-                        }
-                    }
-                }
-
-                Row {
-                    spacing: 6
-                    anchors.horizontalCenter: parent.horizontalCenter
-
-                    Rectangle {
-                        width: 50
-                        height: 18
-                        radius: 9
-                        color: rootContext && (rootContext.shiftXBtn === "0xC0") ? tab1Root.colRose : "#27272a"
-                        Text {
-                            anchors.centerIn: parent
-                            text: "左鍵"
-                            font.pixelSize: 9
-                            font.bold: true
-                            color: rootContext && (rootContext.shiftXBtn === "0xC0") ? "#ffffff" : "#a1a1aa"
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) {
-                                    rootContext.shiftXBtn = "0xC0"
-                                    rootContext.saveCoords()
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 50
-                        height: 18
-                        radius: 9
-                        color: rootContext && (rootContext.shiftXBtn === "0xC1") ? tab1Root.colRose : "#27272a"
-                        Text {
-                            anchors.centerIn: parent
-                            text: "右鍵"
-                            font.pixelSize: 9
-                            font.bold: true
-                            color: rootContext && (rootContext.shiftXBtn === "0xC1") ? "#ffffff" : "#a1a1aa"
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) {
-                                    rootContext.shiftXBtn = "0xC1"
-                                    rootContext.saveCoords()
-                                }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: 50
-                        height: 18
-                        radius: 9
-                        color: rootContext && (rootContext.shiftXBtn === "0xC2") ? tab1Root.colRose : "#27272a"
-                        Text {
-                            anchors.centerIn: parent
-                            text: "中鍵"
-                            font.pixelSize: 9
-                            font.bold: true
-                            color: rootContext && (rootContext.shiftXBtn === "0xC2") ? "#ffffff" : "#a1a1aa"
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (rootContext) {
-                                    rootContext.shiftXBtn = "0xC2"
-                                    rootContext.saveCoords()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        StrikeGroupPanel {
+            width: parent.halfW
+            groupKey: "X"
+            titleText: "精確打擊 (Alt+X)"
+            accent: themeContext ? themeContext.geminiRose : "#f43f5e"
+            pointsModel: rootContext ? rootContext.xPoints : []
         }
     }
 
-    // 行 3：原路折返開關
+    // 第三行：Snap-Back 開關
     Rectangle {
-        width: 524
-        height: 34
-        radius: 8
-        anchors.horizontalCenter: parent.horizontalCenter
-        color: "#18181b"
-        border.width: 1
-        border.color: rootContext && rootContext.cursorReturnEnabled ? tab1Root.colCyan : "#27272a"
-
+        width: Math.min(920, parent.width - 32); anchors.horizontalCenter: parent.horizontalCenter
+        height: 34; radius: 8; color: "#18181b"
+        border.color: (rootContext && rootContext.cursorReturnEnabled) ? themeContext.geminiCyan : "#27272a"; border.width: 1
         Row {
-            anchors.centerIn: parent
-            spacing: 16
-
-            Text {
-                text: "↩️ 點擊後光標原路返回 (Snap-Back)"
-                color: "#ffffff"
-                font.pixelSize: 11
-                font.bold: true
-            }
-            Text {
-                text: "躍遷點擊後，鼠標微秒級折返當前位置"
-                color: "#71717a"
-                font.pixelSize: 9
-            }
+            anchors.centerIn: parent; spacing: 14
+            Text { text: "↩️ 點擊後光標原路返回 (Snap-Back)"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
+            Text { text: "躍遷點擊後，鼠標微秒級折返當前位置"; color: "#71717a"; font.pixelSize: 9 }
             Rectangle {
-                width: 34
-                height: 18
-                radius: 9
-                color: rootContext && rootContext.cursorReturnEnabled ? tab1Root.colCyan : "#3f3f46"
+                width: 34; height: 18; radius: 9
+                color: (rootContext && rootContext.cursorReturnEnabled) ? themeContext.geminiCyan : "#3f3f46"
                 Rectangle {
-                    width: 14
-                    height: 14
-                    radius: 7
-                    color: "#ffffff"
-                    anchors.verticalCenter: parent.verticalCenter
-                    x: rootContext && rootContext.cursorReturnEnabled ? (parent.width - width - 2) : 2
+                    width: 14; height: 14; radius: 7; color: "#ffffff"; y: 2
+                    x: (rootContext && rootContext.cursorReturnEnabled) ? 18 : 2
                     Behavior on x { NumberAnimation { duration: 150 } }
                 }
                 MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        if (rootContext) {
-                            rootContext.cursorReturnEnabled = !rootContext.cursorReturnEnabled
-                            rootContext.saveCoords()
+                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                    onClicked: if (rootContext) { rootContext.cursorReturnEnabled = !rootContext.cursorReturnEnabled; rootContext.saveCoords(); }
+                }
+            }
+        }
+    }
+
+    // 第四行：最近鼠標點擊坐標列表 (點擊複製 · 貼上至任意打擊點)
+    Rectangle {
+        width: Math.min(920, parent.width - 32); anchors.horizontalCenter: parent.horizontalCenter
+        height: 152; radius: 10; color: "#141418"; border.color: "#27272a"; border.width: 1
+        Column {
+            anchors.fill: parent; anchors.margins: 10; spacing: 6
+            Item {
+                width: parent.width; height: 22
+                Row {
+                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; spacing: 8
+                    Text {
+                        text: "🖱️ 最近鼠標點擊坐標 (點擊複製 · 到任意打擊點貼上)"
+                        color: themeContext ? themeContext.geminiCyan : "#38bdf8"
+                        font.pixelSize: 9; font.bold: true
+                    }
+                    Rectangle {
+                        visible: rootContext && rootContext.copiedCoord !== null
+                        width: cpTxt.implicitWidth + 12; height: 18; radius: 9
+                        color: "#1e1b4b"; border.color: themeContext.geminiCyan; border.width: 1
+                        Text {
+                            id: cpTxt; anchors.centerIn: parent
+                            text: (rootContext && rootContext.copiedCoord) ? ("已複製: " + rootContext.copiedCoord.x + ", " + rootContext.copiedCoord.y) : ""
+                            color: "#7dd3fc"; font.family: "monospace"; font.pixelSize: 9; font.bold: true
                         }
+                    }
+                }
+
+                Rectangle {
+                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                    width: 112; height: 22; radius: 11
+                    color: "#1e1b4b"; border.color: themeContext.geminiCyan; border.width: 1
+                    Text { anchors.centerIn: parent; text: "🎯 記錄光標坐標"; color: "#7dd3fc"; font.pixelSize: 9; font.bold: true }
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: if (rootContext) rootContext.pickCurrentCursorCoord()
+                    }
+                }
+            }
+
+            ListView {
+                width: parent.width; height: parent.height - 28; clip: true; spacing: 4
+                model: rootContext ? rootContext.recentClicks : []
+                delegate: Rectangle {
+                    required property var modelData
+                    required property int index
+                    readonly property bool isCopied: rootContext && rootContext.copiedCoord &&
+                                                     rootContext.copiedCoord.x === modelData.x &&
+                                                     rootContext.copiedCoord.y === modelData.y
+                    width: ListView.view.width; height: 26; radius: 6
+                    color: isCopied ? "#172554" : (index === 0 ? "#18181b" : "#121216")
+                    border.color: isCopied ? themeContext.geminiCyan : (index === 0 ? "#3f3f46" : "#27272a"); border.width: 1
+
+                    Row {
+                        anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 10; spacing: 8
+                        Text { text: modelData.time || ""; color: "#71717a"; font.family: "monospace"; font.pixelSize: 9; anchors.verticalCenter: parent.verticalCenter }
+                        Rectangle {
+                            width: 44; height: 16; radius: 4; color: "#1e3a8a"; anchors.verticalCenter: parent.verticalCenter
+                            Text { anchors.centerIn: parent; text: "🖱️ " + tab1.btnLabel(modelData.btn); color: "#93c5fd"; font.pixelSize: 8; font.bold: true }
+                        }
+                        Text {
+                            text: modelData.x + ", " + modelData.y
+                            color: themeContext ? themeContext.geminiGold : "#fde047"
+                            font.family: "monospace"; font.pixelSize: 10; font.bold: true; width: 100
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                            text: modelData.source || ""
+                            color: "#a1a1aa"; font.pixelSize: 9; width: 220; elide: Text.ElideRight
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                            text: isCopied ? "✓ 已複製" : "📋 點擊複製"
+                            color: isCopied ? themeContext.geminiCyan : "#71717a"
+                            font.pixelSize: 8; font.bold: true
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: if (rootContext) rootContext.copyRecentClick(modelData)
                     }
                 }
             }
         }
     }
 
-    // 行 4：腳本按鈕
+    // 第五行：跑商助手與本地優化腳本
     Row {
-        spacing: 14
-        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(920, parent.width - 32); anchors.horizontalCenter: parent.horizontalCenter; spacing: 12
+        readonly property real halfW: (width - spacing) / 2
 
         Rectangle {
-            width: 255
-            height: 38
-            radius: 8
-            color: "#27272a"
-            border.width: 1
-            border.color: "#3f3f46"
-
-            Row {
-                anchors.centerIn: parent
-                spacing: 8
-                Text {
-                    text: "🗺️"
-                    font.pixelSize: 12
-                }
-                Text {
-                    text: "啟動 Albion 跑商助手"
-                    color: "#e4e4e7"
-                    font.pixelSize: 10
-                    font.bold: true
-                }
-            }
+            width: parent.halfW; height: 36; radius: 8; color: "#27272a"; border.color: "#3f3f46"; border.width: 1
+            Text { anchors.centerIn: parent; text: "🗺️ 啟動 Albion 跑商助手"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true }
             MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    if (scriptRunner) scriptRunner.runScript("xdg-open 'https://albiononline2d.com/'")
-                }
+                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                onClicked: if (scriptRunner) scriptRunner.run("xdg-open https://albiononline2d.com/ &")
             }
         }
-
         Rectangle {
-            width: 255
-            height: 38
-            radius: 8
-            color: "#27272a"
-            border.width: 1
-            border.color: "#3f3f46"
-
-            Row {
-                anchors.centerIn: parent
-                spacing: 8
-                Text {
-                    text: "⚔️"
-                    font.pixelSize: 12
-                }
-                Text {
-                    text: "執行本地優化腳本"
-                    color: "#e4e4e7"
-                    font.pixelSize: 10
-                    font.bold: true
-                }
-            }
+            width: parent.halfW; height: 36; radius: 8; color: "#27272a"; border.color: "#3f3f46"; border.width: 1
+            Text { anchors.centerIn: parent; text: "⚔️ 執行本地優化腳本"; color: "#e4e4e7"; font.pixelSize: 10; font.bold: true }
             MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    if (scriptRunner) scriptRunner.runScript("notify-send '遊戲模式' '戰鬥環境已就緒'")
-                }
+                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                onClicked: if (scriptRunner) scriptRunner.run("notify-send 'Albion HUD' '遊戲環境優化腳本已觸發'")
             }
         }
     }
