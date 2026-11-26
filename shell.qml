@@ -34,6 +34,14 @@ ShellRoot {
     property int activeWorkspace: Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace
                                   ? Hyprland.focusedMonitor.activeWorkspace.id : 1
 
+    function onSelectWorkspace(ws) {
+        var nextWs = Math.max(1, Math.min(5, parseInt(ws, 10) || 1));
+        if (nextWs === root.activeWorkspace) return;
+        root.activeWorkspace = nextWs;
+        Hyprland.dispatch("workspace " + nextWs);
+        soundPlayer.play(theme.soundClick);
+    }
+
     // 遊戲作戰狀態 (支持多點 Alt+Z & Alt+X 精確打擊)
     property bool autoClickerEnabled: false
     property string clickerButtonCode: "0xC1"
@@ -918,6 +926,36 @@ ShellRoot {
         clockContext: clockObj
         volControl: volWriter
         soundContext: soundPlayer
+    }
+
+    // 桌面左下角滾輪切換虛擬桌面熱區 (非 CenterInspect 界面)
+    PanelWindow {
+        id: bottomLeftWheelCorner
+        visible: !root.inspectMode && !root.screenPickerActive
+        anchors { bottom: true; left: true }
+        implicitWidth: theme.cornerSize
+        implicitHeight: theme.cornerSize
+        exclusionMode: ExclusionMode.Ignore
+        WlrLayershell.layer: WlrLayer.Overlay
+        color: "transparent"
+
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.NoButton
+            property double lastWheelMs: 0
+            onWheel: function(wheel) {
+                var dy = wheel.angleDelta.y;
+                if (dy === 0) return;
+                var now = Date.now();
+                if (now - lastWheelMs < 120) return;
+                lastWheelMs = now;
+                var cur = root.activeWorkspace;
+                var nextWs = (dy > 0)
+                    ? (cur <= 1 ? 5 : cur - 1)
+                    : (cur >= 5 ? 1 : cur + 1);
+                root.onSelectWorkspace(nextWs);
+            }
+        }
     }
 
     // 全屏坐標取點覆蓋層 (按需開啟，零駐留開銷)
