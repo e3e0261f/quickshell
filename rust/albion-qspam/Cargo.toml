@@ -1,0 +1,12 @@
+[package]
+name = "albion-qspam"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+evdev = "0.13"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

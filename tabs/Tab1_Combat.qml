@@ -233,17 +233,19 @@ Column {
         font.pixelSize: 10; font.bold: true; font.letterSpacing: 1
     }
 
-    // 第一行：鼠標連擊 + 按住 Q 鍵連發
+    // 第一行：鼠標連擊 + 多按鍵按住連發 (+ 添加其他按鍵)
     Row {
+        id: combatRow1
         width: Math.min(920, parent.width - 32); anchors.horizontalCenter: parent.horizontalCenter; spacing: 12
         readonly property real halfW: (width - spacing) / 2
+        readonly property real cardH: Math.max(82, qSpamCard.implicitHeight)
 
         Rectangle {
-            width: parent.halfW; height: 70; radius: 10
+            width: parent.halfW; height: combatRow1.cardH; radius: 10
             color: "#18181b"
             border.color: (rootContext && rootContext.autoClickerEnabled) ? themeContext.geminiGold : "#27272a"; border.width: 1
             Column {
-                anchors.centerIn: parent; width: parent.width - 24; spacing: 6
+                anchors.centerIn: parent; width: parent.width - 24; spacing: 8
                 Item {
                     width: parent.width; height: 28
                     Column {
@@ -287,28 +289,208 @@ Column {
         }
 
         Rectangle {
-            width: parent.halfW; height: 70; radius: 10
+            id: qSpamCard
+            property bool addOpen: false
+            width: parent.halfW
+            implicitHeight: qSpamCol.implicitHeight + 18
+            height: combatRow1.cardH
+            radius: 10
             color: "#18181b"
             border.color: (rootContext && rootContext.autoQActive) ? themeContext.geminiCoral : "#27272a"; border.width: 1
-            Item {
-                anchors.fill: parent; anchors.margins: 18
-                Column {
-                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; spacing: 2
-                    Text { text: "按住 Q 鍵連發模式"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
-                    Text { text: "按住Q無限發送，鬆手即停"; color: "#71717a"; font.pixelSize: 9 }
-                }
-                Rectangle {
-                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
-                    width: 38; height: 22; radius: 11
-                    color: (rootContext && rootContext.autoQActive) ? themeContext.geminiCoral : "#3f3f46"
-                    Rectangle {
-                        width: 18; height: 18; radius: 9; color: "#ffffff"; y: 2
-                        x: (rootContext && rootContext.autoQActive) ? 18 : 2
-                        Behavior on x { NumberAnimation { duration: 150 } }
+
+            Column {
+                id: qSpamCol
+                anchors.centerIn: parent
+                width: parent.width - 24
+                spacing: 6
+
+                // 標題與總開關
+                Item {
+                    width: parent.width; height: 28
+                    Column {
+                        anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                        Text { text: "多按鍵按住連發模式"; color: "#ffffff"; font.pixelSize: 11; font.bold: true }
+                        Text {
+                            text: "按住 " + ((rootContext && rootContext.spamKeys) ? rootContext.spamKeys.join(" / ").toUpperCase() : "Q") + " 無限連發，鬆手即停"
+                            color: "#71717a"; font.pixelSize: 9
+                        }
                     }
-                    MouseArea {
-                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                        onClicked: if (rootContext) rootContext.autoQActive = !rootContext.autoQActive
+                    Rectangle {
+                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                        width: 38; height: 22; radius: 11
+                        color: (rootContext && rootContext.autoQActive) ? themeContext.geminiCoral : "#3f3f46"
+                        Rectangle {
+                            width: 18; height: 18; radius: 9; color: "#ffffff"; y: 2
+                            x: (rootContext && rootContext.autoQActive) ? 18 : 2
+                            Behavior on x { NumberAnimation { duration: 150 } }
+                        }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: if (rootContext) rootContext.autoQActive = !rootContext.autoQActive
+                        }
+                    }
+                }
+
+                // 已啟用按鍵標籤 + 「+」添加按鈕
+                Flow {
+                    width: parent.width
+                    spacing: 5
+
+                    Repeater {
+                        model: (rootContext && rootContext.spamKeys) ? rootContext.spamKeys : ["q"]
+                        Rectangle {
+                            required property var modelData
+                            readonly property string keyName: String(modelData)
+                            readonly property bool canRemove: rootContext && rootContext.spamKeys && rootContext.spamKeys.length > 1
+                            width: keyTagRow.implicitWidth + 12
+                            height: 20
+                            radius: 6
+                            color: (rootContext && rootContext.autoQActive) ? "#3b1722" : "#27272a"
+                            border.color: (rootContext && rootContext.autoQActive) ? themeContext.geminiCoral : "#3f3f46"
+                            border.width: 1
+
+                            Row {
+                                id: keyTagRow
+                                anchors.centerIn: parent
+                                spacing: 4
+                                Text {
+                                    text: keyName.toUpperCase()
+                                    color: (rootContext && rootContext.autoQActive) ? "#fda4af" : "#e4e4e7"
+                                    font.family: "monospace"; font.pixelSize: 9; font.bold: true
+                                    anchors.verticalCenter: parent.verticalCenter
+                                }
+                                Text {
+                                    visible: canRemove
+                                    text: "×"
+                                    color: "#fca5a5"
+                                    font.pixelSize: 10; font.bold: true
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    MouseArea {
+                                        anchors.fill: parent; anchors.margins: -3; cursorShape: Qt.PointingHandCursor
+                                        onClicked: if (rootContext) rootContext.removeSpamKey(keyName)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 「+」添加其他按鍵按鈕
+                    Rectangle {
+                        width: 22; height: 20; radius: 6
+                        color: qSpamCard.addOpen ? "#3b1722" : "#27272a"
+                        border.color: qSpamCard.addOpen ? themeContext.geminiCoral : "#3f3f46"
+                        border.width: 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: qSpamCard.addOpen ? "−" : "+"
+                            color: qSpamCard.addOpen ? themeContext.geminiCoral : "#ffffff"
+                            font.pixelSize: 12; font.bold: true
+                        }
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: qSpamCard.addOpen = !qSpamCard.addOpen
+                        }
+                    }
+                }
+
+                // 展開的「添加連發按鍵」面板（常用快捷鍵 + 自訂輸入）
+                Rectangle {
+                    visible: qSpamCard.addOpen
+                    width: parent.width
+                    height: addDrawerCol.implicitHeight + 10
+                    radius: 7
+                    color: "#121216"
+                    border.color: "#27272a"
+                    border.width: 1
+
+                    Column {
+                        id: addDrawerCol
+                        anchors.fill: parent
+                        anchors.margins: 5
+                        spacing: 5
+
+                        Flow {
+                            width: parent.width
+                            spacing: 4
+                            Repeater {
+                                model: [
+                                    { key: "q", label: "Q" },
+                                    { key: "w", label: "W" },
+                                    { key: "e", label: "E" },
+                                    { key: "r", label: "R" },
+                                    { key: "d", label: "D" },
+                                    { key: "f", label: "F" },
+                                    { key: "1", label: "1" },
+                                    { key: "2", label: "2" },
+                                    { key: "3", label: "3" },
+                                    { key: "space", label: "SPC" },
+                                    { key: "tab", label: "TAB" },
+                                    { key: "f1", label: "F1" },
+                                    { key: "f2", label: "F2" }
+                                ]
+                                Rectangle {
+                                    required property var modelData
+                                    readonly property bool selected: rootContext && rootContext.hasSpamKey(modelData.key)
+                                    width: Math.max(22, chipTxt.implicitWidth + 10)
+                                    height: 18; radius: 5
+                                    color: selected ? themeContext.geminiCoral : "#27272a"
+                                    Text {
+                                        id: chipTxt
+                                        anchors.centerIn: parent
+                                        text: modelData.label
+                                        color: selected ? "#18181b" : "#a1a1aa"
+                                        font.family: "monospace"; font.pixelSize: 8; font.bold: true
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: if (rootContext) rootContext.toggleSpamKey(modelData.key)
+                                    }
+                                }
+                            }
+                        }
+
+                        Row {
+                            width: parent.width; height: 20; spacing: 5
+                            Rectangle {
+                                width: parent.width - 43; height: 20; radius: 5
+                                color: "#18181b"
+                                border.color: addKeyInput.activeFocus ? themeContext.geminiCoral : "#27272a"
+                                border.width: 1
+                                Text {
+                                    visible: addKeyInput.text === ""
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left; anchors.leftMargin: 6
+                                    text: "輸入按鍵如 e, 1, space, f1"
+                                    color: "#52525b"; font.pixelSize: 8
+                                }
+                                TextInput {
+                                    id: addKeyInput
+                                    anchors.fill: parent; anchors.leftMargin: 6; anchors.rightMargin: 6
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    color: "#e4e4e7"; font.family: "monospace"; font.pixelSize: 9
+                                    clip: true
+                                    onAccepted: {
+                                        if (rootContext && rootContext.addSpamKeys(text)) {
+                                            text = "";
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                width: 38; height: 20; radius: 5
+                                color: themeContext ? themeContext.geminiCoral : "#fb7185"
+                                Text { anchors.centerIn: parent; text: "添加"; color: "#18181b"; font.pixelSize: 9; font.bold: true }
+                                MouseArea {
+                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (rootContext && rootContext.addSpamKeys(addKeyInput.text)) {
+                                            addKeyInput.text = "";
+                                            addKeyInput.focus = false;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -6,13 +6,25 @@
   "xy": 1085,
   "xbtn": "0xC1",
   "zPoints": [
-    { "x": 880, "y": 988, "btn": "0xC2" }
+    {
+      "x": 880,
+      "y": 988,
+      "btn": "0xC2"
+    }
   ],
   "xPoints": [
-    { "x": 1200, "y": 1085, "btn": "0xC1" }
+    {
+      "x": 1200,
+      "y": 1085,
+      "btn": "0xC1"
+    }
   ],
   "snap": true,
   "clickerBtn": "0xC1",
+  "spamKeys": [
+    "q",
+    "x"
+  ],
   "caffeine": false,
   "sleepMinutes": 30
 }

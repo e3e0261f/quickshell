@@ -18,8 +18,20 @@ PanelWindow {
     anchors { top: true; bottom: true; left: true; right: true }
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     color: "#55000000"
+
+    onVisibleChanged: {
+        if (visible) {
+            rootFocusScope.forceActiveFocus();
+        }
+    }
+
+    Shortcut {
+        sequence: "Escape"
+        enabled: centerWin.visible
+        onActivated: rootContext.inspectMode = false
+    }
 
     // 默認使用放大後的大尺寸
     property int activeTab: 0
@@ -104,6 +116,15 @@ PanelWindow {
             }
         }
     }
+
+    FocusScope {
+        id: rootFocusScope
+        anchors.fill: parent
+        focus: centerWin.visible
+        Keys.onEscapePressed: function(event) {
+            event.accepted = true;
+            rootContext.inspectMode = false;
+        }
 
     MouseArea {
         anchors.fill: parent
@@ -382,5 +403,6 @@ PanelWindow {
                 }
             }
         }
+    }
     }
 }

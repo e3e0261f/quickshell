@@ -47,18 +47,48 @@ Item {
             next.push({ "icon": "☕", "tag": "手動常亮", "title": "已開啟「破曉無眠」常亮模式", "col": gold });
         }
         if (rootContext && !rootContext.isUserIdle) {
-            next.push({ "icon": "🖱️", "tag": "鍵鼠活動", "title": "2秒內有鼠標/鍵盤輸入", "col": cyan });
+            var rem = Math.max(0, Math.min(2, rootContext.inputCooldownSec));
+            next.push({
+                "icon": "🖱️",
+                "tag": "鍵鼠活動",
+                "title": rem > 0 ? ("2秒內有鼠標/鍵盤輸入 (" + rem + "s)") : "檢測鍵鼠空閒狀態中...",
+                "col": cyan
+            });
         }
+        var seenApps = {};
         if (Mpris && Mpris.players && Mpris.players.values) {
             for (var i = 0; i < Mpris.players.values.length; i++) {
                 var p = Mpris.players.values[i];
                 if (p && p.isPlaying) {
-                    next.push({ "icon": "🎵", "tag": "媒體播放", "title": p.identity || "MPRIS Player", "col": purple });
+                    var idName = String(p.identity || "MPRIS Player");
+                    var isWeb = rootContext && rootContext.isBrowserAudioApp ? rootContext.isBrowserAudioApp(idName, idName) : false;
+                    seenApps[idName.toLowerCase()] = true;
+                    next.push({
+                        "icon": isWeb ? "🌐" : "🎵",
+                        "tag": isWeb ? "網頁播放" : "軟件播放",
+                        "title": idName + (p.trackTitle ? (" · " + p.trackTitle) : ""),
+                        "col": purple
+                    });
                 }
             }
         }
+        if (rootContext && rootContext.activeAudioStreams) {
+            for (var j = 0; j < rootContext.activeAudioStreams.length; j++) {
+                var st = rootContext.activeAudioStreams[j];
+                if (!st) continue;
+                var stKey = String(st.app || st.bin || "").toLowerCase();
+                if (seenApps[stKey]) continue;
+                seenApps[stKey] = true;
+                next.push({
+                    "icon": st.isBrowser ? "🌐" : "🔊",
+                    "tag": st.isBrowser ? "網頁播放" : "軟件播放",
+                    "title": (st.app || st.bin || "Audio") + (st.media ? (" · " + st.media) : ""),
+                    "col": purple
+                });
+            }
+        }
         if (next.length === 0) {
-            next.push({ "icon": "✅", "tag": "倒計時中", "title": "無任何阻擋，正在推進睡眠倒計時", "col": "#4ade80" });
+            next.push({ "icon": "✅", "tag": "倒計時中", "title": "無鍵鼠活動與媒體播放，正在倒計時", "col": "#4ade80" });
         }
         sleepBlockerList = next;
     }
@@ -213,6 +243,20 @@ Item {
                 }
             }
         }
+    }
+
+    Connections {
+        target: rootContext
+        function onIsUserIdleChanged() { tab3.refreshSleepBlockers(); }
+        function onInputCooldownSecChanged() { tab3.refreshSleepBlockers(); }
+        function onCaffeineActiveChanged() { tab3.refreshSleepBlockers(); }
+        function onActiveAudioStreamsChanged() { tab3.refreshSleepBlockers(); }
+        function onHasMediaBlockerChanged() { tab3.refreshSleepBlockers(); }
+    }
+
+    Timer {
+        interval: 500; running: tab3.showSleepBlockers; repeat: true
+        onTriggered: tab3.refreshSleepBlockers()
     }
 
     Timer {
@@ -821,7 +865,13 @@ Item {
                                     Text { anchors.centerIn: parent; text: String(modelData); color: focused ? "#18181b" : "#a1a1aa"; font.pixelSize: 9; font.bold: true }
                                     MouseArea {
                                         anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                        onClicked: Hyprland.dispatch("workspace " + modelData)
+                                        onClicked: {
+                                            if (rootContext && rootContext.onSelectWorkspace) {
+                                                rootContext.onSelectWorkspace(modelData);
+                                            } else {
+                                                Hyprland.dispatch("workspace " + modelData);
+                                            }
+                                        }
                                     }
                                 }
                             }

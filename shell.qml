@@ -24,7 +24,10 @@ ShellRoot {
     property bool caffeineActive: false
     property int sleepMinutes: 30
     property int sleepCountdown: 1800
-    property bool isUserIdle: false
+    property bool isUserIdle: idleMon.isIdle
+    property int inputCooldownSec: idleMon.isIdle ? 0 : 2
+    property var activeAudioStreams: []
+    property bool hasMediaBlocker: false
 
     property int systemVolume: 50
     property bool systemMuted: false
@@ -33,12 +36,59 @@ ShellRoot {
 
     property int activeWorkspace: Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace
                                   ? Hyprland.focusedMonitor.activeWorkspace.id : 1
+    property string wsToastText: ""
+    property bool wsToastVisible: false
+
+    Timer {
+        id: wsToastTimer
+        interval: 1400
+        repeat: false
+        onTriggered: root.wsToastVisible = false
+    }
+
+    Process {
+        id: wsSwitchProc
+        property int targetWs: 1
+        stdout: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("WHEEL-HYPR", s);
+            }
+        }
+        stderr: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("WHEEL-ERR", s);
+            }
+        }
+    }
 
     function onSelectWorkspace(ws) {
-        var nextWs = Math.max(1, Math.min(5, parseInt(ws, 10) || 1));
-        if (nextWs === root.activeWorkspace) return;
-        root.activeWorkspace = nextWs;
-        Hyprland.dispatch("workspace " + nextWs);
+        var nextWs = Math.max(1, Math.min(10, parseInt(ws, 10) || 1));
+        var hasMon = !!(Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace);
+        var cur = hasMon ? Hyprland.focusedMonitor.activeWorkspace.id : root.activeWorkspace;
+        appendCombatLog("WHEEL", "onSelectWorkspace 調用: req=" + ws + " nextWs=" + nextWs + " cur=" + cur + " hasMon=" + hasMon + " mon=" + (Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : "null"));
+        if (nextWs === cur) {
+            appendCombatLog("WHEEL", "跳過切換: nextWs === cur (" + cur + ")");
+            return;
+        }
+        wsSwitchProc.targetWs = nextWs;
+        var hlCmd = "hyprctl dispatch 'hl.dsp.focus({ workspace = " + nextWs + " })'";
+        wsSwitchProc.command = [
+            "sh", "-c",
+            "OUT=$(" + hlCmd + " 2>&1); EC=$?; " +
+            "if [ $EC -ne 0 ] || echo \"$OUT\" | grep -qiE 'invalid|error|unknown'; then " +
+            "  OUT=\"$OUT | fallback:$(hyprctl dispatch workspace " + nextWs + " 2>&1)\"; EC=$?; " +
+            "fi; " +
+            "NOW_WS=$(hyprctl activeworkspace -j 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print(str(d.get(\"id\"))+\"@\"+str(d.get(\"monitor\")))' 2>/dev/null || echo '?'); " +
+            "echo \"cmd=" + hlCmd + " ec=$EC out=$OUT now=$NOW_WS\""
+        ];
+        wsSwitchProc.running = false;
+        wsSwitchProc.running = true;
+        if (Hyprland.refreshWorkspaces) Hyprland.refreshWorkspaces();
+        root.wsToastText = "🖥️ 虛擬桌面 " + nextWs + " / 5";
+        root.wsToastVisible = true;
+        wsToastTimer.restart();
         soundPlayer.play(theme.soundClick);
     }
 
@@ -46,7 +96,102 @@ ShellRoot {
     property bool autoClickerEnabled: false
     property string clickerButtonCode: "0xC1"
     property bool autoQActive: false
+    property var spamKeys: ["q"]
     property bool cursorReturnEnabled: true
+
+    function normalizeSpamKey(raw) {
+        var k = String(raw || "").trim().toLowerCase();
+        if (k === "spc") k = "space";
+        if (k === "ret" || k === "return") k = "enter";
+        if (k === "escape") k = "esc";
+        if (!/^([a-z0-9]|f([1-9]|1[0-2])|space|tab|enter|esc|up|down|left|right)$/.test(k)) {
+            return "";
+        }
+        return k;
+    }
+
+    function sanitizeSpamKeys(arr) {
+        var out = [];
+        var seen = {};
+        if (!arr) return out;
+        for (var i = 0; i < arr.length; i++) {
+            var k = normalizeSpamKey(arr[i]);
+            if (!k || seen[k]) continue;
+            seen[k] = true;
+            out.push(k);
+        }
+        return out;
+    }
+
+    function hasSpamKey(keyName) {
+        var k = normalizeSpamKey(keyName);
+        return k !== "" && root.spamKeys && root.spamKeys.indexOf(k) !== -1;
+    }
+
+    function addSpamKeys(rawText) {
+        var tokens = sanitizeSpamKeys(String(rawText || "").split(/[\s,]+/));
+        if (tokens.length === 0) {
+            appendCombatLog("QSPAM", "⚠️ 無有效按鍵名稱（支援 a-z, 0-9, f1-f12, space, tab, enter, esc, 方向鍵）");
+            return false;
+        }
+        var next = sanitizeSpamKeys(root.spamKeys);
+        var added = [];
+        for (var i = 0; i < tokens.length; i++) {
+            if (next.indexOf(tokens[i]) === -1) {
+                next.push(tokens[i]);
+                added.push(tokens[i]);
+            }
+        }
+        if (added.length === 0) {
+            appendCombatLog("QSPAM", "按鍵已在列表中: [" + next.join(", ") + "]");
+            return true;
+        }
+        root.spamKeys = next;
+        saveCoords();
+        appendCombatLog("QSPAM", "已添加連發按鍵 [" + added.join(", ") + "] -> [" + root.spamKeys.join(", ") + "]");
+        if (root.autoQActive) launchQSpam();
+        return true;
+    }
+
+    function removeSpamKey(keyName) {
+        var k = normalizeSpamKey(keyName);
+        if (!k) return;
+        var next = [];
+        for (var i = 0; i < root.spamKeys.length; i++) {
+            var cur = normalizeSpamKey(root.spamKeys[i]);
+            if (cur && cur !== k) next.push(cur);
+        }
+        if (next.length === 0) {
+            appendCombatLog("QSPAM", "⚠️ 至少需保留 1 個連發按鍵");
+            return;
+        }
+        root.spamKeys = next;
+        saveCoords();
+        appendCombatLog("QSPAM", "已移除連發按鍵 [" + k + "] -> [" + root.spamKeys.join(", ") + "]");
+        if (root.autoQActive) launchQSpam();
+    }
+
+    function toggleSpamKey(keyName) {
+        var k = normalizeSpamKey(keyName);
+        if (!k) return;
+        if (hasSpamKey(k)) {
+            removeSpamKey(k);
+        } else {
+            addSpamKeys(k);
+        }
+    }
+
+    function setSpamKeysFromText(rawText) {
+        var next = sanitizeSpamKeys(String(rawText || "").split(/[\s,]+/));
+        if (next.length === 0) {
+            appendCombatLog("QSPAM", "⚠️ 無有效按鍵，維持原設定: [" + root.spamKeys.join(", ") + "]");
+            return;
+        }
+        root.spamKeys = next;
+        saveCoords();
+        appendCombatLog("QSPAM", "連發按鍵列表 -> [" + root.spamKeys.join(", ") + "]");
+        if (root.autoQActive) launchQSpam();
+    }
 
     property var zPoints: [
         { "x": 880, "y": 988, "btn": "0xC2" }
@@ -167,11 +312,80 @@ ShellRoot {
         }
     }
 
+    function isBrowserAudioApp(binStr, appStr) {
+        var combined = (String(binStr || "") + " " + String(appStr || "")).toLowerCase();
+        return /chrom|firefox|brave|vivaldi|opera|edge|zen|librewolf|webkit/.test(combined);
+    }
+
+    function refreshMediaState() {
+        var playing = (root.activeAudioStreams && root.activeAudioStreams.length > 0);
+        if (!playing && Mpris && Mpris.players && Mpris.players.values) {
+            for (var i = 0; i < Mpris.players.values.length; i++) {
+                var p = Mpris.players.values[i];
+                if (p && p.isPlaying) {
+                    playing = true;
+                    break;
+                }
+            }
+        }
+        root.hasMediaBlocker = playing;
+    }
+
+    Process {
+        id: audioStreamProbeProc
+        running: true
+        command: [
+            "sh", "-c",
+            "pactl list sink-inputs 2>/dev/null | awk '" +
+            "function flush() { if (id != \"\" && cork == \"no\" && app !~ /canberra/i && bin !~ /canberra/i) { print (bin != \"\" ? bin : \"audio\") \"|\" app \"|\" media } } " +
+            "/^Sink Input #/ { flush(); id=$0; cork=\"no\"; app=\"\"; bin=\"\"; media=\"\" } " +
+            "/^[[:space:]]*Corked:/ { cork=$2 } " +
+            "/application\\.name = / { sub(/^[^\"]*\"/, \"\"); sub(/\"$/, \"\"); app=$0 } " +
+            "/application\\.process\\.binary = / { sub(/^[^\"]*\"/, \"\"); sub(/\"$/, \"\"); bin=$0 } " +
+            "/media\\.name = / { sub(/^[^\"]*\"/, \"\"); sub(/\"$/, \"\"); media=$0 } " +
+            "END { flush() }'"
+        ]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var lines = text.trim().split("\n");
+                var out = [];
+                var seen = {};
+                for (var i = 0; i < lines.length; i++) {
+                    var ln = lines[i].trim();
+                    if (!ln) continue;
+                    var parts = ln.split("|");
+                    var bin = parts[0] || "audio";
+                    var app = parts[1] || bin;
+                    var media = parts[2] || "";
+                    var key = (bin + "|" + app).toLowerCase();
+                    if (seen[key]) continue;
+                    seen[key] = true;
+                    out.push({
+                        "bin": bin,
+                        "app": app,
+                        "media": media,
+                        "isBrowser": root.isBrowserAudioApp(bin, app)
+                    });
+                }
+                root.activeAudioStreams = out;
+                root.refreshMediaState();
+            }
+        }
+    }
+
     Timer {
         interval: 1000; running: true; repeat: true; triggeredOnStart: true
         onTriggered: {
             root.updateClock();
-            if (root.caffeineActive || !root.isUserIdle) {
+            root.refreshMediaState();
+            root.isUserIdle = idleMon.isIdle;
+            if (idleMon.isIdle) {
+                root.inputCooldownSec = 0;
+            } else if (root.inputCooldownSec > 0) {
+                root.inputCooldownSec -= 1;
+            }
+
+            if (root.caffeineActive || !root.isUserIdle || root.hasMediaBlocker) {
                 root.sleepCountdown = root.sleepMinutes * 60;
             } else if (root.sleepCountdown > 0) {
                 root.sleepCountdown -= 1;
@@ -182,11 +396,18 @@ ShellRoot {
         }
     }
 
-    // 睡眠空閒檢測
+    // 睡眠空閒檢測 (忽略瀏覽器/遊戲 idle-inhibit 鎖，僅檢測真實鍵鼠活動)
     IdleMonitor {
         id: idleMon
         timeout: 2
-        onIsIdleChanged: root.isUserIdle = idleMon.isIdle
+        respectInhibitors: false
+        onIsIdleChanged: {
+            root.isUserIdle = idleMon.isIdle;
+            root.inputCooldownSec = idleMon.isIdle ? 0 : 2;
+            if (root.inspectMode) {
+                appendCombatLog("SLEEP", "IdleMonitor -> isIdle=" + idleMon.isIdle + " hasMedia=" + root.hasMediaBlocker);
+            }
+        }
     }
 
     // ========================================================
@@ -328,6 +549,7 @@ ShellRoot {
             "xPoints": root.xPoints,
             "snap": root.cursorReturnEnabled,
             "clickerBtn": root.clickerButtonCode,
+            "spamKeys": root.spamKeys,
             "caffeine": root.caffeineActive,
             "sleepMinutes": root.sleepMinutes
         };
@@ -358,6 +580,10 @@ ShellRoot {
                     }
                     if (obj.snap !== undefined) root.cursorReturnEnabled = !!obj.snap;
                     if (obj.clickerBtn) root.clickerButtonCode = String(obj.clickerBtn);
+                    if (obj.spamKeys && obj.spamKeys.length > 0) {
+                        var loadedKeys = root.sanitizeSpamKeys(obj.spamKeys);
+                        if (loadedKeys.length > 0) root.spamKeys = loadedKeys;
+                    }
                     if (obj.caffeine !== undefined) root.caffeineActive = !!obj.caffeine;
                     if (obj.sleepMinutes !== undefined && obj.sleepMinutes >= 1) {
                         root.sleepMinutes = Number(obj.sleepMinutes);
@@ -507,11 +733,28 @@ ShellRoot {
         }
     }
 
+    function launchQSpam() {
+        var cleanKeys = root.sanitizeSpamKeys(root.spamKeys);
+        var keysArg = cleanKeys.length > 0 ? cleanKeys.join(",") : "q";
+        autoQRunner.running = false;
+        autoQRunner.command = [
+            "sh", "-c",
+            "pkill -x albion-qspam 2>/dev/null || true; " +
+            "touch /tmp/q_spam_enabled && " +
+            "BIN=" + JSON.stringify(root.qspamBinPath) + "; " +
+            "[ -x \"$BIN\" ] || BIN=\"$HOME/.config/quickshell/albion-qspam\"; " +
+            "if [ ! -e \"$BIN\" ]; then echo \"ERR: binary not found at $BIN\" >&2; exit 127; fi; " +
+            "if [ ! -x \"$BIN\" ]; then chmod +x \"$BIN\" 2>/dev/null || true; fi; " +
+            "echo \"LAUNCH $BIN --flag /tmp/q_spam_enabled --keys " + keysArg + "\"; " +
+            "exec \"$BIN\" --flag /tmp/q_spam_enabled --keys " + keysArg + " 2>&1"
+        ];
+        autoQRunner.running = true;
+    }
+
     onAutoQActiveChanged: {
-        appendCombatLog("QSPAM", "開關切換 -> " + (autoQActive ? "ON" : "OFF"));
+        appendCombatLog("QSPAM", "開關切換 -> " + (autoQActive ? "ON" : "OFF") + " (按鍵=" + root.spamKeys.join(",") + ")");
         if (autoQActive) {
-            autoQRunner.running = false;
-            autoQRunner.running = true;
+            launchQSpam();
         } else {
             autoQRunner.running = false;
             qspamKillProc.running = false;
@@ -568,18 +811,7 @@ ShellRoot {
 
     Process {
         id: autoQRunner
-        command: [
-            "sh", "-c",
-            "pkill -x albion-qspam 2>/dev/null || true; " +
-            "touch /tmp/q_spam_enabled && " +
-            "BIN=" + JSON.stringify(root.qspamBinPath) + "; " +
-            "[ -x \"$BIN\" ] || BIN=\"$HOME/.config/quickshell/albion-qspam\"; " +
-            "if [ ! -e \"$BIN\" ]; then echo \"ERR: binary not found at $BIN\" >&2; exit 127; fi; " +
-            "if [ ! -x \"$BIN\" ]; then chmod +x \"$BIN\" 2>/dev/null || true; fi; " +
-            "echo \"LAUNCH $BIN (/tmp/q_spam_enabled 已建立)\"; " +
-            "exec \"$BIN\" 2>&1"
-        ]
-        onStarted: root.appendCombatLog("QSPAM", "albion-qspam 已啟動 (/tmp/q_spam_enabled 已建立)")
+        onStarted: root.appendCombatLog("QSPAM", "albion-qspam 已啟動 (keys=" + root.spamKeys.join(",") + ")")
         onExited: function(code, status) {
             root.appendCombatLog("QSPAM", "進程退出 code=" + code + " status=" + status);
             if (root.autoQActive && code !== 0) {
@@ -880,6 +1112,7 @@ ShellRoot {
             if (!volReader.running) volReader.running = true;
             if (!wifiProcess.running) wifiProcess.running = true;
             if (!imeProcess.running) imeProcess.running = true;
+            if (!audioStreamProbeProc.running) audioStreamProbeProc.running = true;
         }
     }
 
@@ -928,32 +1161,117 @@ ShellRoot {
         soundContext: soundPlayer
     }
 
-    // 桌面左下角滾輪切換虛擬桌面熱區 (非 CenterInspect 界面)
-    PanelWindow {
-        id: bottomLeftWheelCorner
-        visible: !root.inspectMode && !root.screenPickerActive
-        anchors { bottom: true; left: true }
-        implicitWidth: theme.cornerSize
-        implicitHeight: theme.cornerSize
-        exclusionMode: ExclusionMode.Ignore
-        WlrLayershell.layer: WlrLayer.Overlay
-        color: "transparent"
+    // 桌面左下角滾輪切換虛擬桌面熱區 (僅在非 CenterInspect 界面且全螢幕兼容)
+    Variants {
+        model: Quickshell.screens
+        PanelWindow {
+            id: bottomLeftWheelCorner
+            required property var modelData
+            screen: modelData
+            visible: !root.inspectMode && !root.screenPickerActive
+            anchors { bottom: true; left: true }
+            implicitWidth: 44
+            implicitHeight: 44
+            exclusionMode: ExclusionMode.Ignore
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "quickshell-bottom-left-wheel"
+            color: "transparent"
 
-        MouseArea {
-            anchors.fill: parent
-            acceptedButtons: Qt.NoButton
             property double lastWheelMs: 0
-            onWheel: function(wheel) {
-                var dy = wheel.angleDelta.y;
-                if (dy === 0) return;
-                var now = Date.now();
-                if (now - lastWheelMs < 120) return;
-                lastWheelMs = now;
-                var cur = root.activeWorkspace;
-                var nextWs = (dy > 0)
-                    ? (cur <= 1 ? 5 : cur - 1)
-                    : (cur >= 5 ? 1 : cur + 1);
-                root.onSelectWorkspace(nextWs);
+
+            Rectangle {
+                anchors.fill: parent
+                color: cornerMouse.containsMouse ? "#1a38bdf8" : "#01000000"
+                border.width: cornerMouse.containsMouse ? 1 : 0
+                border.color: "#66fde047"
+                radius: 8
+
+                Text {
+                    visible: cornerMouse.containsMouse
+                    anchors.centerIn: parent
+                    text: "W" + ((Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace)
+                                 ? Hyprland.focusedMonitor.activeWorkspace.id
+                                 : root.activeWorkspace)
+                    color: theme.geminiGold
+                    font.family: "monospace"
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+
+                MouseArea {
+                    id: cornerMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onEntered: {
+                        var cur = (Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace)
+                                  ? Hyprland.focusedMonitor.activeWorkspace.id
+                                  : root.activeWorkspace;
+                        root.appendCombatLog("WHEEL", "進入左下角熱區 screen=" + (modelData ? modelData.name : "?") + " curWs=" + cur);
+                    }
+                    onWheel: function(wheel) {
+                        wheel.accepted = true;
+                        var ay = wheel.angleDelta ? wheel.angleDelta.y : 0;
+                        var py = wheel.pixelDelta ? wheel.pixelDelta.y : 0;
+                        var cur = (Hyprland.focusedMonitor && Hyprland.focusedMonitor.activeWorkspace)
+                                  ? Hyprland.focusedMonitor.activeWorkspace.id
+                                  : root.activeWorkspace;
+                        root.appendCombatLog("WHEEL", "onWheel 事件: angleY=" + ay + " pixelY=" + py + " inv=" + (!!wheel.inverted) + " curWs=" + cur);
+                        var dy = ay !== 0 ? ay : py;
+                        if (dy === 0) {
+                            root.appendCombatLog("WHEEL", "忽略 dy=0 的滾輪事件");
+                            return;
+                        }
+                        var now = Date.now();
+                        if (now - bottomLeftWheelCorner.lastWheelMs < 120) {
+                            root.appendCombatLog("WHEEL", "節流跳過 (<120ms)");
+                            return;
+                        }
+                        bottomLeftWheelCorner.lastWheelMs = now;
+                        var nextWs = (dy > 0)
+                            ? (cur <= 1 ? 5 : cur - 1)
+                            : (cur >= 5 ? 1 : cur + 1);
+                        root.onSelectWorkspace(nextWs);
+                    }
+                }
+            }
+        }
+    }
+
+    // 左下角虛擬桌面切換浮動提示 (穿透鼠標)
+    Variants {
+        model: Quickshell.screens
+        PanelWindow {
+            required property var modelData
+            screen: modelData
+            visible: root.wsToastVisible && !root.inspectMode && !root.screenPickerActive
+            anchors { bottom: true; left: true }
+            implicitWidth: wsToastTxt.implicitWidth + 48
+            implicitHeight: 90
+            exclusionMode: ExclusionMode.Ignore
+            mask: Region {}
+            WlrLayershell.layer: WlrLayer.Overlay
+            color: "transparent"
+
+            Rectangle {
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 52
+                anchors.left: parent.left
+                anchors.leftMargin: 12
+                width: wsToastTxt.implicitWidth + 24
+                height: 28
+                radius: 14
+                color: "#e618181b"
+                border.width: 1
+                border.color: theme.geminiGold
+
+                Text {
+                    id: wsToastTxt
+                    anchors.centerIn: parent
+                    text: root.wsToastText
+                    color: "#f4f4f5"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
             }
         }
     }
