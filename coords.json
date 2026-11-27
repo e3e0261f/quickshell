@@ -21,10 +21,20 @@
   ],
   "snap": true,
   "clickerBtn": "0xC1",
+  "autoClicker": false,
   "spamKeys": [
-    "q",
-    "x"
+    "q"
   ],
+  "autoQ": true,
   "caffeine": false,
-  "sleepMinutes": 30
+  "sleepMinutes": 30,
+  "boostGlow": false,
+  "chimeEnabled": true,
+  "alarmEnabled": true,
+  "alarmHour": 7,
+  "alarmMinute": 30,
+  "netmonLevel": 2,
+  "netmonPin": false,
+  "activeTab": 1,
+  "cardLarge": true
 }

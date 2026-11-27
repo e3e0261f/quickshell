@@ -33,12 +33,38 @@ PanelWindow {
         onActivated: rootContext.inspectMode = false
     }
 
-    // 默認使用放大後的大尺寸
-    property int activeTab: 0
-    property bool cardLarge: true
+    // 默認使用放大後的大尺寸（與持久化配置同步）
+    property int activeTab: rootContext ? rootContext.savedActiveTab : 0
+    property bool cardLarge: rootContext ? rootContext.savedCardLarge : true
     property bool cardFullscreen: false
     property int customCardWidth: 0
     property int customCardHeight: 0
+
+    onActiveTabChanged: {
+        if (rootContext && rootContext.savedActiveTab !== activeTab) {
+            rootContext.savedActiveTab = activeTab;
+            if (rootContext.coordsLoaded) rootContext.saveCoords();
+        }
+    }
+    onCardLargeChanged: {
+        if (rootContext && rootContext.savedCardLarge !== cardLarge) {
+            rootContext.savedCardLarge = cardLarge;
+            if (rootContext.coordsLoaded) rootContext.saveCoords();
+        }
+    }
+    Connections {
+        target: rootContext
+        function onSavedActiveTabChanged() {
+            if (rootContext && centerWin.activeTab !== rootContext.savedActiveTab) {
+                centerWin.activeTab = rootContext.savedActiveTab;
+            }
+        }
+        function onSavedCardLargeChanged() {
+            if (rootContext && centerWin.cardLarge !== rootContext.savedCardLarge) {
+                centerWin.cardLarge = rootContext.savedCardLarge;
+            }
+        }
+    }
 
     // 網絡工坊遙測狀態 (Tab2_Net 綁定)
     property bool cfExpanded: false

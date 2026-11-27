@@ -15,11 +15,28 @@ ShellRoot {
     // 全局狀態與數據中樞
     // ========================================================
     property bool inspectMode: false
+    property int savedActiveTab: 0
+    property bool savedCardLarge: true
+    property bool coordsLoaded: false
+    property bool savePending: false
+    readonly property string localCoordsPath: Qt.resolvedUrl("coords.json").toString().replace(/^file:\/\//, "")
+
     property bool boostGlow: config.boostGlowDefault
     property bool chimeEnabled: config.chimeEnabledDefault
     property bool alarmEnabled: config.alarmEnabledDefault
     property int alarmHour: theme.defaultAlarmHour
     property int alarmMinute: theme.defaultAlarmMinute
+
+    onBoostGlowChanged: if (root.coordsLoaded) saveCoords()
+    onChimeEnabledChanged: if (root.coordsLoaded) saveCoords()
+    onAlarmEnabledChanged: if (root.coordsLoaded) saveCoords()
+    onAlarmHourChanged: if (root.coordsLoaded) saveCoords()
+    onAlarmMinuteChanged: if (root.coordsLoaded) saveCoords()
+    onCaffeineActiveChanged: if (root.coordsLoaded) saveCoords()
+    onSleepMinutesChanged: if (root.coordsLoaded) saveCoords()
+    onCursorReturnEnabledChanged: if (root.coordsLoaded) saveCoords()
+    onNetmonLevelChanged: if (root.coordsLoaded) saveCoords()
+    onNetmonPinChanged: if (root.coordsLoaded) saveCoords()
 
     property bool caffeineActive: false
     property int sleepMinutes: 30
@@ -533,12 +550,12 @@ ShellRoot {
     }
 
     // ========================================================
-    // 持久化配置讀寫 (coords.json)
+    // 持久化配置讀寫 (原子寫入 ~/.config/quickshell/coords.json，防重開機丟失)
     // ========================================================
-    function saveCoords() {
+    function buildCoordsPayload() {
         var firstZ = root.zPoints.length > 0 ? root.zPoints[0] : { "x": 880, "y": 988, "btn": "0xC2" };
         var firstX = root.xPoints.length > 0 ? root.xPoints[0] : { "x": 1200, "y": 1085, "btn": "0xC1" };
-        var payload = {
+        return {
             "zx": firstZ.x,
             "zy": firstZ.y,
             "zbtn": firstZ.btn,
@@ -549,52 +566,135 @@ ShellRoot {
             "xPoints": root.xPoints,
             "snap": root.cursorReturnEnabled,
             "clickerBtn": root.clickerButtonCode,
+            "autoClicker": root.autoClickerEnabled,
             "spamKeys": root.spamKeys,
+            "autoQ": root.autoQActive,
             "caffeine": root.caffeineActive,
-            "sleepMinutes": root.sleepMinutes
+            "sleepMinutes": root.sleepMinutes,
+            "boostGlow": root.boostGlow,
+            "chimeEnabled": root.chimeEnabled,
+            "alarmEnabled": root.alarmEnabled,
+            "alarmHour": root.alarmHour,
+            "alarmMinute": root.alarmMinute,
+            "netmonLevel": root.netmonLevel,
+            "netmonPin": root.netmonPin,
+            "activeTab": root.savedActiveTab,
+            "cardLarge": root.savedCardLarge
         };
-        saveCoordsProc.command = ["sh", "-c", "cat <<'EOF' > \"$HOME/.config/quickshell/coords.json\"\n" + JSON.stringify(payload, null, 2) + "\nEOF"];
-        saveCoordsProc.running = false;
+    }
+
+    function flushSaveCoords() {
+        if (saveCoordsProc.running) {
+            root.savePending = true;
+            return;
+        }
+        root.savePending = false;
+        var jsonStr = JSON.stringify(buildCoordsPayload(), null, 2);
+        saveCoordsProc.command = [
+            "sh", "-c",
+            "CFG_DIR=\"${XDG_CONFIG_HOME:-$HOME/.config}/quickshell\"; " +
+            "CFG_FILE=\"$CFG_DIR/coords.json\"; " +
+            "mkdir -p \"$CFG_DIR\" && " +
+            "TMP_FILE=\"$CFG_FILE.tmp.$$\"; " +
+            "cat <<'__QS_COORDS_EOF__' > \"$TMP_FILE\"\n" +
+            jsonStr + "\n" +
+            "__QS_COORDS_EOF__\n" +
+            "sync \"$TMP_FILE\" 2>/dev/null || true; " +
+            "mv -f \"$TMP_FILE\" \"$CFG_FILE\""
+        ];
         saveCoordsProc.running = true;
+    }
+
+    function saveCoords() {
+        if (!root.coordsLoaded) return;
+        flushSaveCoords();
     }
 
     Process {
         id: loadCoordsProc
-        command: ["sh", "-c", "cat \"$HOME/.config/quickshell/coords.json\" 2>/dev/null || cat ./coords.json 2>/dev/null || echo '{}'"]
-        running: true
+        running: false
+        command: [
+            "sh", "-c",
+            "CFG_FILE=\"${XDG_CONFIG_HOME:-$HOME/.config}/quickshell/coords.json\"; " +
+            "LOCAL_FILE=" + JSON.stringify(root.localCoordsPath) + "; " +
+            "if [ -s \"$CFG_FILE\" ]; then cat \"$CFG_FILE\"; " +
+            "elif [ -s \"$LOCAL_FILE\" ]; then cat \"$LOCAL_FILE\"; " +
+            "else echo '{}'; fi"
+        ]
         stdout: StdioCollector {
             onStreamFinished: {
                 var data = text.trim();
-                if (!data) return;
-                try {
-                    var obj = JSON.parse(data);
-                    if (obj.zPoints && obj.zPoints.length > 0) {
-                        root.zPoints = obj.zPoints;
-                    } else if (obj.zx !== undefined) {
-                        root.zPoints = [{ "x": Number(obj.zx), "y": Number(obj.zy || 0), "btn": String(obj.zbtn || "0xC2") }];
+                var parsedOk = false;
+                if (data) {
+                    try {
+                        var obj = JSON.parse(data);
+                        parsedOk = true;
+                        if (obj.zPoints && obj.zPoints.length > 0) {
+                            root.zPoints = obj.zPoints;
+                        } else if (obj.zx !== undefined) {
+                            root.zPoints = [{ "x": Number(obj.zx), "y": Number(obj.zy || 0), "btn": String(obj.zbtn || "0xC2") }];
+                        }
+                        if (obj.xPoints && obj.xPoints.length > 0) {
+                            root.xPoints = obj.xPoints;
+                        } else if (obj.xx !== undefined) {
+                            root.xPoints = [{ "x": Number(obj.xx), "y": Number(obj.xy || 0), "btn": String(obj.xbtn || "0xC1") }];
+                        }
+                        if (obj.snap !== undefined) root.cursorReturnEnabled = !!obj.snap;
+                        if (obj.clickerBtn) root.clickerButtonCode = String(obj.clickerBtn);
+                        if (obj.spamKeys && obj.spamKeys.length > 0) {
+                            var loadedKeys = root.sanitizeSpamKeys(obj.spamKeys);
+                            if (loadedKeys.length > 0) root.spamKeys = loadedKeys;
+                        }
+                        if (obj.caffeine !== undefined) root.caffeineActive = !!obj.caffeine;
+                        if (obj.sleepMinutes !== undefined && obj.sleepMinutes >= 1) {
+                            root.sleepMinutes = Number(obj.sleepMinutes);
+                            root.sleepCountdown = root.sleepMinutes * 60;
+                        }
+                        if (obj.boostGlow !== undefined) root.boostGlow = !!obj.boostGlow;
+                        if (obj.chimeEnabled !== undefined) root.chimeEnabled = !!obj.chimeEnabled;
+                        if (obj.alarmEnabled !== undefined) root.alarmEnabled = !!obj.alarmEnabled;
+                        if (obj.alarmHour !== undefined) root.alarmHour = ((parseInt(obj.alarmHour, 10) || 0) % 12 + 12) % 12;
+                        if (obj.alarmMinute !== undefined) root.alarmMinute = ((parseInt(obj.alarmMinute, 10) || 0) % 60 + 60) % 60;
+                        if (obj.netmonLevel !== undefined) root.netmonLevel = Math.max(1, Math.min(10, parseInt(obj.netmonLevel, 10) || 2));
+                        if (obj.netmonPin !== undefined) root.netmonPin = !!obj.netmonPin;
+                        if (obj.activeTab !== undefined) root.savedActiveTab = Math.max(0, Math.min(3, parseInt(obj.activeTab, 10) || 0));
+                        if (obj.cardLarge !== undefined) root.savedCardLarge = !!obj.cardLarge;
+                        if (obj.autoClicker !== undefined) root.autoClickerEnabled = !!obj.autoClicker;
+                        if (obj.autoQ !== undefined) root.autoQActive = !!obj.autoQ;
+                    } catch(e) {
+                        root.appendCombatLog("CONFIG-ERR", "解析 coords.json 失敗: " + e);
                     }
-                    if (obj.xPoints && obj.xPoints.length > 0) {
-                        root.xPoints = obj.xPoints;
-                    } else if (obj.xx !== undefined) {
-                        root.xPoints = [{ "x": Number(obj.xx), "y": Number(obj.xy || 0), "btn": String(obj.xbtn || "0xC1") }];
-                    }
-                    if (obj.snap !== undefined) root.cursorReturnEnabled = !!obj.snap;
-                    if (obj.clickerBtn) root.clickerButtonCode = String(obj.clickerBtn);
-                    if (obj.spamKeys && obj.spamKeys.length > 0) {
-                        var loadedKeys = root.sanitizeSpamKeys(obj.spamKeys);
-                        if (loadedKeys.length > 0) root.spamKeys = loadedKeys;
-                    }
-                    if (obj.caffeine !== undefined) root.caffeineActive = !!obj.caffeine;
-                    if (obj.sleepMinutes !== undefined && obj.sleepMinutes >= 1) {
-                        root.sleepMinutes = Number(obj.sleepMinutes);
-                        root.sleepCountdown = root.sleepMinutes * 60;
-                    }
-                } catch(e) {}
+                }
+                root.coordsLoaded = true;
+                root.appendCombatLog(
+                    "CONFIG",
+                    (parsedOk ? "已載入持久化設定" : "初始化預設設定") +
+                    " | spamKeys=[" + root.spamKeys.join(",") + "] autoQ=" + root.autoQActive + " autoClicker=" + root.autoClickerEnabled
+                );
+                if (!parsedOk || data === "{}") {
+                    root.saveCoords();
+                }
             }
         }
     }
 
-    Process { id: saveCoordsProc }
+    Process {
+        id: saveCoordsProc
+        onExited: function(code, status) {
+            if (code !== 0) {
+                root.appendCombatLog("CONFIG-ERR", "寫入 coords.json 失敗 code=" + code);
+            }
+            if (root.savePending) {
+                root.flushSaveCoords();
+            }
+        }
+        stderr: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") root.appendCombatLog("CONFIG-ERR", s);
+            }
+        }
+    }
 
     // ========================================================
     // 全局快捷鍵與外設執行器
@@ -662,9 +762,18 @@ ShellRoot {
         combatDiagProc.running = true;
     }
 
+    Process {
+        id: startupCleanupProc
+        command: ["sh", "-c", "rm -f /tmp/q_spam_enabled /tmp/clicker_enabled /tmp/netmon_pin; pkill -x albion-qspam 2>/dev/null || true; pkill -x albion-clicker 2>/dev/null || true; pkill -x focus-netmon 2>/dev/null || true; pkill -f '[s]leep_guard.sh' 2>/dev/null || true"]
+        onExited: {
+            loadCoordsProc.running = false;
+            loadCoordsProc.running = true;
+        }
+    }
+
     Component.onCompleted: {
-        scriptRunner.run("rm -f /tmp/q_spam_enabled /tmp/clicker_enabled /tmp/netmon_pin; pkill -x albion-qspam 2>/dev/null || true; pkill -x albion-clicker 2>/dev/null || true; pkill -x focus-netmon 2>/dev/null || true; pkill -f '[s]leep_guard.sh' 2>/dev/null || true");
-        appendCombatLog("INIT", "Quickshell 已初始化並清理舊鎖定文件 (/tmp/clicker_enabled, /tmp/q_spam_enabled)");
+        startupCleanupProc.running = true;
+        appendCombatLog("INIT", "Quickshell 已初始化，正在清理舊鎖定文件並載入持久化配置...");
     }
 
     Timer {
@@ -722,6 +831,7 @@ ShellRoot {
             clickerKillProc.running = false;
             clickerKillProc.running = true;
         }
+        if (root.coordsLoaded) saveCoords();
     }
 
     onClickerButtonCodeChanged: {
@@ -731,6 +841,7 @@ ShellRoot {
             clickerBtnWriter.running = false;
             clickerBtnWriter.running = true;
         }
+        if (root.coordsLoaded) saveCoords();
     }
 
     function launchQSpam() {
@@ -760,6 +871,7 @@ ShellRoot {
             qspamKillProc.running = false;
             qspamKillProc.running = true;
         }
+        if (root.coordsLoaded) saveCoords();
     }
 
     Process { id: clickerBtnWriter }
