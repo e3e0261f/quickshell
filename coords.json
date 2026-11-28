@@ -25,7 +25,7 @@
   "spamKeys": [
     "q"
   ],
-  "autoQ": true,
+  "autoQ": false,
   "caffeine": false,
   "sleepMinutes": 30,
   "boostGlow": false,
@@ -35,6 +35,8 @@
   "alarmMinute": 30,
   "netmonLevel": 2,
   "netmonPin": false,
-  "activeTab": 1,
+  "ptmEnabled": true,
+  "ptmKey": "capslock",
+  "activeTab": 3,
   "cardLarge": true
 }

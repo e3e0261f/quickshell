@@ -34,6 +34,18 @@ Item {
     property string pairReqPasskey: ""
     property bool trayMenuVisible: false
     property var activeTrayMenu: null
+    property bool ptmKeyPickerOpen: false
+
+    function ptmKeyDisplay(raw) {
+        var k = String(raw || "v").toLowerCase();
+        if (k === "capslock") return "CAPS";
+        if (k === "grave") return "`";
+        if (k === "space") return "SPC";
+        if (k === "mouse4") return "側鍵4";
+        if (k === "mouse5") return "側鍵5";
+        if (k === "mousemiddle") return "中鍵";
+        return k.toUpperCase();
+    }
 
     property var sleepBlockerList: []
 
@@ -526,6 +538,216 @@ Item {
                                 text: (rootContext ? rootContext.systemVolume : 50) + "%"
                                 color: "#a1a1aa"; font.family: "monospace"; font.pixelSize: 10; font.bold: true
                                 width: 32; horizontalAlignment: Text.AlignRight; anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+                    }
+
+                    // Push-to-Mute 按住靜音開關與鍵位配置
+                    Rectangle {
+                        readonly property bool ptmOn: !!(rootContext && rootContext.ptmEnabled)
+                        readonly property bool ptmRunning: !!(rootContext && rootContext.ptmRunningReal)
+                        readonly property bool ptmActiveMute: !!(rootContext && rootContext.ptmMuted)
+                        width: parent.width
+                        implicitHeight: ptmCol.implicitHeight + 14
+                        radius: 8
+                        color: ptmActiveMute ? "#2a0a12" : "#18181b"
+                        border.color: ptmActiveMute ? "#fb7185" : ((ptmOn && ptmRunning) ? "#34d399" : (ptmOn ? "#f59e0b" : (tab3.ptmKeyPickerOpen ? themeContext.geminiCyan : "#27272a")))
+                        border.width: 1
+
+                        Column {
+                            id: ptmCol
+                            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                            anchors.margins: 7; anchors.leftMargin: 10; anchors.rightMargin: 10
+                            spacing: 7
+
+                            Item {
+                                width: parent.width; height: 24
+                                Row {
+                                    anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter; spacing: 6
+                                    Text {
+                                        text: (rootContext && rootContext.ptmMuted)
+                                            ? "🎙️✕ 麥克風靜音中"
+                                            : ((rootContext && rootContext.ptmEnabled)
+                                                ? (rootContext.ptmRunningReal ? "🎙️ Push-to-Mute 就緒" : "⚠️ Push-to-Mute 未運行 (點擊重試)")
+                                                : "🎙️ Push-to-Mute (按住靜音)")
+                                        color: (rootContext && rootContext.ptmMuted)
+                                            ? "#fda4af"
+                                            : ((rootContext && rootContext.ptmEnabled)
+                                                ? (rootContext.ptmRunningReal ? "#6ee7b7" : "#fbbf24")
+                                                : "#e4e4e7")
+                                        font.pixelSize: 11; font.bold: true
+                                        MouseArea {
+                                            enabled: !!(rootContext && rootContext.ptmEnabled && !rootContext.ptmRunningReal)
+                                            anchors.fill: parent
+                                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                            onClicked: if (rootContext) rootContext.launchPtm()
+                                        }
+                                    }
+                                }
+
+                                Row {
+                                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter; spacing: 6
+
+                                    Rectangle {
+                                        visible: !!(rootContext && rootContext.ptmMuted)
+                                        width: 44; height: 20; radius: 5; color: "#4c0519"; border.color: "#fb7185"; border.width: 1
+                                        Text { anchors.centerIn: parent; text: "解除"; color: "#ffe4e6"; font.pixelSize: 9; font.bold: true }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: if (rootContext) rootContext.ptmUnmuteNow()
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: ptmBadgeTxt.implicitWidth + 14; height: 20; radius: 5
+                                        color: tab3.ptmKeyPickerOpen ? "#172554" : "#27272a"
+                                        border.color: tab3.ptmKeyPickerOpen ? themeContext.geminiCyan : "#3f3f46"
+                                        border.width: 1
+                                        Text {
+                                            id: ptmBadgeTxt
+                                            anchors.centerIn: parent
+                                            text: "鍵: " + tab3.ptmKeyDisplay(rootContext ? rootContext.ptmKey : "v") + (tab3.ptmKeyPickerOpen ? " ▴" : " ▾")
+                                            color: tab3.ptmKeyPickerOpen ? themeContext.geminiCyan : themeContext.geminiGold
+                                            font.family: "monospace"; font.pixelSize: 9; font.bold: true
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: tab3.ptmKeyPickerOpen = !tab3.ptmKeyPickerOpen
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        width: 34; height: 18; radius: 9
+                                        color: (rootContext && rootContext.ptmEnabled) ? "#10b981" : "#3f3f46"
+                                        Rectangle {
+                                            width: 14; height: 14; radius: 7; color: "#ffffff"; y: 2
+                                            x: (rootContext && rootContext.ptmEnabled) ? 18 : 2
+                                            Behavior on x { NumberAnimation { duration: 150 } }
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: if (rootContext) rootContext.ptmEnabled = !rootContext.ptmEnabled
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: tab3.ptmKeyPickerOpen
+                                width: parent.width
+                                implicitHeight: ptmPickerCol.implicitHeight + 12
+                                radius: 6; color: "#121216"; border.color: "#2e2e36"; border.width: 1
+
+                                Column {
+                                    id: ptmPickerCol
+                                    anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+                                    anchors.margins: 6
+                                    spacing: 6
+
+                                    Flow {
+                                        width: parent.width; spacing: 4
+                                        Repeater {
+                                            model: [
+                                                { "k": "v", "label": "V" },
+                                                { "k": "capslock", "label": "CAPS" },
+                                                { "k": "grave", "label": "`" },
+                                                { "k": "b", "label": "B" },
+                                                { "k": "f4", "label": "F4" },
+                                                { "k": "f8", "label": "F8" },
+                                                { "k": "ralt", "label": "RALT" },
+                                                { "k": "rctrl", "label": "RCTRL" },
+                                                { "k": "mouse4", "label": "側鍵4" },
+                                                { "k": "mouse5", "label": "側鍵5" },
+                                                { "k": "mousemiddle", "label": "中鍵" }
+                                            ]
+                                            Rectangle {
+                                                required property var modelData
+                                                readonly property bool activeKey: rootContext && rootContext.ptmKey === modelData.k
+                                                width: presetTxt.implicitWidth + 12; height: 20; radius: 5
+                                                color: activeKey ? "#064e3b" : "#1f1f24"
+                                                border.color: activeKey ? "#34d399" : "#3f3f46"
+                                                border.width: 1
+                                                Text {
+                                                    id: presetTxt
+                                                    anchors.centerIn: parent
+                                                    text: modelData.label
+                                                    color: activeKey ? "#6ee7b7" : "#d4d4d8"
+                                                    font.family: "monospace"; font.pixelSize: 9; font.bold: true
+                                                }
+                                                MouseArea {
+                                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        if (rootContext) rootContext.setPtmKey(modelData.k);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Row {
+                                        width: parent.width; height: 24; spacing: 6
+                                        Rectangle {
+                                            width: parent.width - 52; height: 24; radius: 5
+                                            color: "#09090b"; border.color: ptmCustomInput.activeFocus ? themeContext.geminiCyan : "#3f3f46"; border.width: 1
+                                            TextInput {
+                                                id: ptmCustomInput
+                                                anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8
+                                                verticalAlignment: TextInput.AlignVCenter
+                                                color: "#f4f4f5"; font.family: "monospace"; font.pixelSize: 10
+                                                clip: true; selectByMouse: true
+                                                Text {
+                                                    visible: ptmCustomInput.text.length === 0
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: "自定義: a-z, f1-f12, capslock, mouse4..."
+                                                    color: "#52525b"; font.pixelSize: 9
+                                                }
+                                                onAccepted: {
+                                                    if (rootContext && rootContext.setPtmKey(ptmCustomInput.text)) {
+                                                        ptmCustomInput.text = "";
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Rectangle {
+                                            width: 46; height: 24; radius: 5
+                                            color: "#065f46"; border.color: "#34d399"; border.width: 1
+                                            Text { anchors.centerIn: parent; text: "確定"; color: "#ecfdf5"; font.pixelSize: 9; font.bold: true }
+                                            MouseArea {
+                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    if (rootContext && rootContext.setPtmKey(ptmCustomInput.text)) {
+                                                        ptmCustomInput.text = "";
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Item {
+                                        width: parent.width; height: 20
+                                        Text {
+                                            anchors.left: parent.left; anchors.right: ptmTestBtn.left; anchors.rightMargin: 6
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            elide: Text.ElideRight
+                                            font.family: "monospace"; font.pixelSize: 8
+                                            color: (rootContext && rootContext.ptmLastError) ? "#fda4af" : "#71717a"
+                                            text: (rootContext && rootContext.ptmLastError)
+                                                ? ("ERR: " + rootContext.ptmLastError)
+                                                : ((rootContext && rootContext.ptmBackendInfo) ? rootContext.ptmBackendInfo : "等待啟動 Push-to-Mute...")
+                                        }
+                                        Rectangle {
+                                            id: ptmTestBtn
+                                            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                            width: 62; height: 18; radius: 4
+                                            color: "#27272a"; border.color: "#52525b"; border.width: 1
+                                            Text { anchors.centerIn: parent; text: "測試靜音"; color: "#fda4af"; font.pixelSize: 8; font.bold: true }
+                                            MouseArea {
+                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                onClicked: if (rootContext) rootContext.testPtmAudioMute()
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

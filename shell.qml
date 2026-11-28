@@ -37,6 +37,29 @@ ShellRoot {
     onCursorReturnEnabledChanged: if (root.coordsLoaded) saveCoords()
     onNetmonLevelChanged: if (root.coordsLoaded) saveCoords()
     onNetmonPinChanged: if (root.coordsLoaded) saveCoords()
+    onPtmEnabledChanged: {
+        appendCombatLog("PTM", "Push-to-Mute 開關 -> " + (ptmEnabled ? "ON" : "OFF") + " (鍵位=" + root.ptmKey + ")");
+        if (ptmEnabled) {
+            root.ptmLastError = "";
+            launchPtm();
+        } else {
+            root.ptmRestartPending = false;
+            ptmRestartTimer.stop();
+            ptmRunner.running = false;
+            root.ptmMuted = false;
+            ptmKillProc.running = false;
+            ptmKillProc.running = true;
+        }
+        if (root.coordsLoaded) saveCoords();
+    }
+    onPtmKeyChanged: {
+        appendCombatLog("PTM", "Push-to-Mute 鍵位 -> " + root.ptmKey);
+        if (root.ptmEnabled) {
+            root.ptmLastError = "";
+            launchPtm();
+        }
+        if (root.coordsLoaded) saveCoords();
+    }
 
     property bool caffeineActive: false
     property int sleepMinutes: 30
@@ -48,6 +71,12 @@ ShellRoot {
 
     property int systemVolume: 50
     property bool systemMuted: false
+    property bool ptmEnabled: false
+    property string ptmKey: "v"
+    property bool ptmMuted: false
+    property bool ptmRestartPending: false
+    property string ptmBackendInfo: ""
+    property string ptmLastError: ""
     property string currentWifi: "未連接"
     property string currentIme: "EN (英文)"
 
@@ -578,6 +607,8 @@ ShellRoot {
             "alarmMinute": root.alarmMinute,
             "netmonLevel": root.netmonLevel,
             "netmonPin": root.netmonPin,
+            "ptmEnabled": root.ptmEnabled,
+            "ptmKey": root.ptmKey,
             "activeTab": root.savedActiveTab,
             "cardLarge": root.savedCardLarge
         };
@@ -657,10 +688,15 @@ ShellRoot {
                         if (obj.alarmMinute !== undefined) root.alarmMinute = ((parseInt(obj.alarmMinute, 10) || 0) % 60 + 60) % 60;
                         if (obj.netmonLevel !== undefined) root.netmonLevel = Math.max(1, Math.min(10, parseInt(obj.netmonLevel, 10) || 2));
                         if (obj.netmonPin !== undefined) root.netmonPin = !!obj.netmonPin;
+                        if (obj.ptmKey !== undefined) {
+                            var loadedPtmKey = root.normalizePtmKey(obj.ptmKey);
+                            if (loadedPtmKey) root.ptmKey = loadedPtmKey;
+                        }
                         if (obj.activeTab !== undefined) root.savedActiveTab = Math.max(0, Math.min(3, parseInt(obj.activeTab, 10) || 0));
                         if (obj.cardLarge !== undefined) root.savedCardLarge = !!obj.cardLarge;
                         if (obj.autoClicker !== undefined) root.autoClickerEnabled = !!obj.autoClicker;
                         if (obj.autoQ !== undefined) root.autoQActive = !!obj.autoQ;
+                        if (obj.ptmEnabled !== undefined) root.ptmEnabled = !!obj.ptmEnabled;
                     } catch(e) {
                         root.appendCombatLog("CONFIG-ERR", "解析 coords.json 失敗: " + e);
                     }
@@ -669,7 +705,7 @@ ShellRoot {
                 root.appendCombatLog(
                     "CONFIG",
                     (parsedOk ? "已載入持久化設定" : "初始化預設設定") +
-                    " | spamKeys=[" + root.spamKeys.join(",") + "] autoQ=" + root.autoQActive + " autoClicker=" + root.autoClickerEnabled
+                    " | spamKeys=[" + root.spamKeys.join(",") + "] autoQ=" + root.autoQActive + " autoClicker=" + root.autoClickerEnabled + " ptm=" + root.ptmEnabled + "(" + root.ptmKey + ")"
                 );
                 if (!parsedOk || data === "{}") {
                     root.saveCoords();
@@ -735,10 +771,12 @@ ShellRoot {
 
     readonly property string clickerBinPath: Qt.resolvedUrl("albion-clicker").toString().replace(/^file:\/\//, "")
     readonly property string qspamBinPath: Qt.resolvedUrl("albion-qspam").toString().replace(/^file:\/\//, "")
+    readonly property string ptmBinPath: Qt.resolvedUrl("albion-ptm").toString().replace(/^file:\/\//, "")
 
     property var combatDebugLogs: []
     property bool clickerRunningReal: autoClickerRunner.running
     property bool qspamRunningReal: autoQRunner.running
+    property bool ptmRunningReal: ptmRunner.running
 
     function appendCombatLog(tag, msg) {
         var line = "[" + clockObj.fullTimeString + "] [" + tag + "] " + String(msg);
@@ -764,7 +802,7 @@ ShellRoot {
 
     Process {
         id: startupCleanupProc
-        command: ["sh", "-c", "rm -f /tmp/q_spam_enabled /tmp/clicker_enabled /tmp/netmon_pin; pkill -x albion-qspam 2>/dev/null || true; pkill -x albion-clicker 2>/dev/null || true; pkill -x focus-netmon 2>/dev/null || true; pkill -f '[s]leep_guard.sh' 2>/dev/null || true"]
+        command: ["sh", "-c", "rm -f /tmp/q_spam_enabled /tmp/clicker_enabled /tmp/netmon_pin; pkill -x albion-qspam 2>/dev/null || true; pkill -x albion-clicker 2>/dev/null || true; pkill -x albion-ptm 2>/dev/null || true; if [ -f /tmp/albion_ptm_py.pid ]; then kill \"$(cat /tmp/albion_ptm_py.pid 2>/dev/null)\" 2>/dev/null || true; rm -f /tmp/albion_ptm_py.pid; fi; pkill -x focus-netmon 2>/dev/null || true; pkill -f '[s]leep_guard.sh' 2>/dev/null || true; " + root.ptmMuteShellCmd(false)]
         onExited: {
             loadCoordsProc.running = false;
             loadCoordsProc.running = true;
@@ -940,6 +978,274 @@ ShellRoot {
             onRead: function(line) {
                 var s = String(line).trim();
                 if (s !== "") root.appendCombatLog("QSPAM-ERR", s);
+            }
+        }
+    }
+
+    function normalizePtmKey(raw) {
+        var k = String(raw || "").trim().toLowerCase();
+        if (k === "caps" || k === "caps_lock") k = "capslock";
+        if (k === "`") k = "grave";
+        if (k === "spc") k = "space";
+        if (k === "ret" || k === "return") k = "enter";
+        if (k === "escape") k = "esc";
+        if (k === "-") k = "minus";
+        if (k === "=") k = "equal";
+        if (k === "mmiddle" || k === "middle") k = "mousemiddle";
+        if (k === "mside" || k === "side") k = "mouse4";
+        if (k === "mextra" || k === "extra") k = "mouse5";
+        if (!/^([a-z0-9]|f([1-9]|1[0-2])|capslock|grave|tab|space|enter|esc|minus|equal|lshift|rshift|lctrl|rctrl|lalt|ralt|pause|scrolllock|insert|up|down|left|right|mousemiddle|mouse4|mouse5)$/.test(k)) {
+            return "";
+        }
+        return k;
+    }
+
+    function setPtmKey(raw) {
+        var k = normalizePtmKey(raw);
+        if (!k) {
+            appendCombatLog("PTM", "⚠️ 無效的 Push-to-Mute 鍵位: " + raw);
+            return false;
+        }
+        if (root.ptmKey !== k) {
+            root.ptmKey = k;
+        } else if (root.ptmEnabled) {
+            launchPtm();
+        }
+        return true;
+    }
+
+    function ptmMuteShellCmd(muted) {
+        var v = muted ? "1" : "0";
+        var p = muted ? "-m" : "-u";
+        return "if command -v wpctl >/dev/null 2>&1; then " +
+               "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ " + v + " 2>/dev/null || true; " +
+               "for id in $(wpctl status 2>/dev/null | awk '/^Audio/{a=1} /^Video|^Settings/{a=0} a && /Sources:/{f=1;next} f && /(Filters|Streams|Sinks|Endpoints):/{f=0} f{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\\.$/){sub(/\\.$/,\"\",$i); print $i; break}}'); do " +
+               "wpctl set-mute \"$id\" " + v + " 2>/dev/null || true; " +
+               "done; fi; " +
+               "if command -v pactl >/dev/null 2>&1; then " +
+               "pactl set-source-mute @DEFAULT_SOURCE@ " + v + " 2>/dev/null || true; " +
+               "for s in $(pactl list short sources 2>/dev/null | awk '$2 !~ /\\.monitor$/ {print $1}'); do " +
+               "pactl set-source-mute \"$s\" " + v + " 2>/dev/null || true; " +
+               "done; fi; " +
+               "if ! command -v wpctl >/dev/null 2>&1 && ! command -v pactl >/dev/null 2>&1 && command -v pamixer >/dev/null 2>&1; then " +
+               "pamixer --default-source " + p + " 2>/dev/null || true; fi";
+    }
+
+    function ptmUnmuteNow() {
+        root.ptmMuted = false;
+        ptmUnmuteProc.command = ["sh", "-c", root.ptmMuteShellCmd(false)];
+        ptmUnmuteProc.running = false;
+        ptmUnmuteProc.running = true;
+    }
+
+    function testPtmAudioMute() {
+        if (ptmTestMuteProc.running) return;
+        root.ptmMuted = true;
+        ptmTestMuteProc.command = [
+            "sh", "-c",
+            root.ptmMuteShellCmd(true) + "; " +
+            "echo \"TEST|MUTED|$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null || pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null || echo ok)\"; " +
+            "sleep 1.2; " +
+            root.ptmMuteShellCmd(false) + "; " +
+            "echo \"TEST|LIVE|$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null || pactl get-source-mute @DEFAULT_SOURCE@ 2>/dev/null || echo ok)\""
+        ];
+        ptmTestMuteProc.running = true;
+    }
+
+    function startPtmProcessNow() {
+        var k = root.normalizePtmKey(root.ptmKey) || "v";
+        root.ptmMuted = false;
+        var muteOnCmd = root.ptmMuteShellCmd(true);
+        var muteOffCmd = root.ptmMuteShellCmd(false);
+        var pyCode = [
+            "import sys, os, glob, fcntl, struct, selectors, subprocess, signal",
+            "KEY_MAP = {",
+            " 'a':30,'b':48,'c':46,'d':32,'e':18,'f':33,'g':34,'h':35,'i':23,'j':36,'k':37,'l':38,'m':50,",
+            " 'n':49,'o':24,'p':25,'q':16,'r':19,'s':31,'t':20,'u':22,'v':47,'w':17,'x':45,'y':21,'z':44,",
+            " '1':2,'2':3,'3':4,'4':5,'5':6,'6':7,'7':8,'8':9,'9':10,'0':11,",
+            " 'f1':59,'f2':60,'f3':61,'f4':62,'f5':63,'f6':64,'f7':65,'f8':66,'f9':67,'f10':68,'f11':87,'f12':88,",
+            " 'capslock':58,'grave':41,'tab':15,'space':57,'enter':28,'esc':1,'minus':12,'equal':13,",
+            " 'lshift':42,'rshift':54,'lctrl':29,'rctrl':97,'lalt':56,'ralt':100,'pause':119,'scrolllock':70,'insert':110,",
+            " 'up':103,'down':108,'left':105,'right':106,'mousemiddle':0x112,'mouse4':0x113,'mouse5':0x114",
+            "}",
+            "tname = sys.argv[1] if len(sys.argv) > 1 else 'v'",
+            "tcode = KEY_MAP.get(tname)",
+            "if tcode is None: print('ERR|unsupported_key:' + tname, flush=True); sys.exit(1)",
+            "CMD_ON = sys.argv[2]",
+            "CMD_OFF = sys.argv[3]",
+            "def set_mute(m):",
+            " subprocess.run(['sh','-c', CMD_ON if m else CMD_OFF])",
+            " print('STATE|' + ('MUTED' if m else 'LIVE'), flush=True)",
+            "try: open('/tmp/albion_ptm_py.pid','w').write(str(os.getpid()))",
+            "except Exception: pass",
+            "set_mute(False)",
+            "def on_exit(sig, frm):",
+            " try: os.remove('/tmp/albion_ptm_py.pid')",
+            " except Exception: pass",
+            " set_mute(False); sys.exit(0)",
+            "signal.signal(signal.SIGTERM, on_exit); signal.signal(signal.SIGINT, on_exit)",
+            "sel = selectors.DefaultSelector(); opened = []",
+            "for p in sorted(glob.glob('/dev/input/event*')):",
+            " try:",
+            "  fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)",
+            "  nb = bytearray(256)",
+            "  try: fcntl.ioctl(fd, 0x81004506, nb, True); nm = nb.split(b'\\x00',1)[0].decode('utf-8','ignore').lower()",
+            "  except Exception: nm = ''",
+            "  if any(x in nm for x in ('ydotool','hl-virtual-keyboard','albion-qspam','albion-clicker')): os.close(fd); continue",
+            "  b0 = bytearray(8); fcntl.ioctl(fd, 0x80084520, b0, True)",
+            "  if not (b0[0] & 0x02): os.close(fd); continue",
+            "  b1 = bytearray(96); fcntl.ioctl(fd, 0x80604521, b1, True)",
+            "  if (b1[tcode // 8] >> (tcode % 8)) & 1: sel.register(fd, selectors.EVENT_READ); opened.append(fd)",
+            "  else: os.close(fd)",
+            " except Exception: pass",
+            "if not opened: print('ERR|no_evdev_device_for:' + tname, flush=True); sys.exit(1)",
+            "print(f'READY|{tname}|py_evdev|devs={len(opened)}', flush=True)",
+            "EV_FMT = '@llHHi'; EV_SZ = struct.calcsize(EV_FMT); held = set()",
+            "while True:",
+            " for key, _ in sel.select():",
+            "  try: data = os.read(key.fd, EV_SZ * 16)",
+            "  except BlockingIOError: continue",
+            "  except OSError:",
+            "   sel.unregister(key.fd)",
+            "   if key.fd in held:",
+            "    held.discard(key.fd)",
+            "    if not held: set_mute(False)",
+            "   continue",
+            "  for off in range(0, len(data) - EV_SZ + 1, EV_SZ):",
+            "   _, _, typ, code, val = struct.unpack_from(EV_FMT, data, off)",
+            "   if typ == 1 and code == tcode:",
+            "    if val == 1 and key.fd not in held:",
+            "     held.add(key.fd)",
+            "     if len(held) == 1: set_mute(True)",
+            "    elif val == 0 and key.fd in held:",
+            "     held.discard(key.fd)",
+            "     if not held: set_mute(False)"
+        ].join("\n");
+
+        ptmRunner.command = [
+            "sh", "-c",
+            "pkill -x albion-ptm 2>/dev/null || true; " +
+            "if [ -f /tmp/albion_ptm_py.pid ]; then kill \"$(cat /tmp/albion_ptm_py.pid 2>/dev/null)\" 2>/dev/null || true; rm -f /tmp/albion_ptm_py.pid; fi; " +
+            "BIN=" + JSON.stringify(root.ptmBinPath) + "; " +
+            "[ -x \"$BIN\" ] || BIN=\"$HOME/.config/quickshell/albion-ptm\"; " +
+            "if [ -e \"$BIN\" ]; then " +
+            "  [ -x \"$BIN\" ] || chmod +x \"$BIN\" 2>/dev/null || true; " +
+            "  if [ -x \"$BIN\" ]; then exec \"$BIN\" --key \"$1\" 2>&1; fi; " +
+            "fi; " +
+            "exec python3 -u -c \"$2\" \"$1\" \"$3\" \"$4\" 2>&1",
+            "_", k, pyCode, muteOnCmd, muteOffCmd
+        ];
+        root.appendCombatLog("PTM", "啟動 Push-to-Mute (key=" + k + ")");
+        ptmRunner.running = true;
+    }
+
+    function launchPtm() {
+        root.ptmMuted = false;
+        if (ptmRunner.running) {
+            root.ptmRestartPending = true;
+            ptmRunner.running = false;
+            ptmStopOnlyProc.running = false;
+            ptmStopOnlyProc.running = true;
+            ptmRestartTimer.restart();
+            return;
+        }
+        root.ptmRestartPending = false;
+        ptmRestartTimer.stop();
+        startPtmProcessNow();
+    }
+
+    Timer {
+        id: ptmRestartTimer
+        interval: 90
+        repeat: false
+        onTriggered: {
+            if (!root.ptmEnabled || !root.ptmRestartPending) return;
+            if (!ptmRunner.running) {
+                root.ptmRestartPending = false;
+                root.startPtmProcessNow();
+            } else {
+                ptmRestartTimer.restart();
+            }
+        }
+    }
+
+    Process {
+        id: ptmStopOnlyProc
+        command: ["sh", "-c", "pkill -x albion-ptm 2>/dev/null || true; if [ -f /tmp/albion_ptm_py.pid ]; then kill \"$(cat /tmp/albion_ptm_py.pid 2>/dev/null)\" 2>/dev/null || true; rm -f /tmp/albion_ptm_py.pid; fi"]
+    }
+
+    Process {
+        id: ptmUnmuteProc
+    }
+
+    Process {
+        id: ptmTestMuteProc
+        stdout: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (!s) return;
+                root.appendCombatLog("PTM-TEST", s);
+                if (s.indexOf("TEST|MUTED|") === 0) {
+                    root.ptmMuted = true;
+                    root.ptmBackendInfo = s;
+                } else if (s.indexOf("TEST|LIVE|") === 0) {
+                    root.ptmMuted = false;
+                    root.ptmBackendInfo = s;
+                }
+            }
+        }
+        onExited: function() {
+            if (!ptmRunner.running) root.ptmMuted = false;
+        }
+    }
+
+    Process {
+        id: ptmKillProc
+        command: ["sh", "-c", "pkill -x albion-ptm 2>/dev/null || true; if [ -f /tmp/albion_ptm_py.pid ]; then kill \"$(cat /tmp/albion_ptm_py.pid 2>/dev/null)\" 2>/dev/null || true; rm -f /tmp/albion_ptm_py.pid; fi; " + root.ptmMuteShellCmd(false)]
+    }
+
+    Process {
+        id: ptmRunner
+        onExited: function(code, status) {
+            root.ptmMuted = false;
+            root.appendCombatLog("PTM", "Push-to-Mute 進程退出 code=" + code + " status=" + status);
+            if (root.ptmEnabled && root.ptmRestartPending) {
+                root.ptmRestartPending = false;
+                ptmRestartTimer.stop();
+                root.startPtmProcessNow();
+                return;
+            }
+            if (!root.ptmEnabled) {
+                root.ptmUnmuteNow();
+            } else if (code !== 0) {
+                root.ptmLastError = "進程異常退出 code=" + code;
+            }
+        }
+        stdout: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (!s) return;
+                if (s === "STATE|MUTED") {
+                    root.ptmMuted = true;
+                } else if (s === "STATE|LIVE") {
+                    root.ptmMuted = false;
+                } else if (s.indexOf("READY|") === 0) {
+                    root.ptmLastError = "";
+                    root.ptmBackendInfo = s;
+                    root.appendCombatLog("PTM", "就緒: " + s);
+                } else if (s.indexOf("ERR|") === 0) {
+                    root.ptmLastError = s;
+                    root.appendCombatLog("PTM-ERR", s);
+                }
+            }
+        }
+        stderr: SplitParser {
+            onRead: function(line) {
+                var s = String(line).trim();
+                if (s !== "") {
+                    root.ptmLastError = s;
+                    root.appendCombatLog("PTM-ERR", s);
+                }
             }
         }
     }
@@ -1383,6 +1689,53 @@ ShellRoot {
                     color: "#f4f4f5"
                     font.pixelSize: 11
                     font.bold: true
+                }
+            }
+        }
+    }
+
+    // Push-to-Mute 麥克風靜音浮動指示膠囊 (穿透鼠標，按住靜音時顯示)
+    Variants {
+        model: Quickshell.screens
+        PanelWindow {
+            required property var modelData
+            screen: modelData
+            visible: root.ptmMuted
+            anchors { top: true; left: true; right: true }
+            implicitHeight: 62
+            exclusionMode: ExclusionMode.Ignore
+            mask: Region {}
+            WlrLayershell.layer: WlrLayer.Overlay
+            WlrLayershell.namespace: "quickshell-ptm-osd"
+            color: "transparent"
+
+            Rectangle {
+                anchors.top: parent.top
+                anchors.topMargin: 20
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: ptmOsdRow.implicitWidth + 28
+                height: 30
+                radius: 15
+                color: "#eb2a0a12"
+                border.width: 1
+                border.color: "#fb7185"
+
+                Row {
+                    id: ptmOsdRow
+                    anchors.centerIn: parent
+                    spacing: 8
+                    Rectangle {
+                        width: 7; height: 7; radius: 4
+                        color: "#fb7185"
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    Text {
+                        text: "🎙️✕ 麥克風靜音中 · 鬆開 [" + String(root.ptmKey || "v").toUpperCase() + "] 恢復"
+                        color: "#ffe4e6"
+                        font.pixelSize: 11
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
             }
         }
